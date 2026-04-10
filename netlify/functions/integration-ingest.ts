@@ -1,5 +1,6 @@
 import { getAdminSupabase } from "../../src/lib/supabase/admin-client";
 import { insertAuditLog, slugify } from "../../src/lib/app-data";
+import type { Database, Json, TablesInsert } from "../../supabase/types";
 
 function json(statusCode: number, body: Record<string, unknown>) {
   return {
@@ -13,6 +14,15 @@ function json(statusCode: number, body: Record<string, unknown>) {
 
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function toIntegrationProvider(value: unknown): Database["public"]["Enums"]["integration_provider"] {
+  const normalized = asString(value);
+  if (normalized === "ringba" || normalized === "retreaver" || normalized === "trackdrive" || normalized === "custom") {
+    return normalized;
+  }
+
+  return "custom";
 }
 
 function toIsoDate(value: string) {
@@ -76,7 +86,7 @@ export async function handler(event: {
   const payload = event.body ? JSON.parse(event.body) : {};
   const organizationId = asString(payload.organizationId || event.headers?.["x-organization-id"]);
   const integrationId = asString(payload.integrationId || event.headers?.["x-integration-id"]);
-  const provider = asString(payload.provider || event.headers?.["x-provider"] || "custom");
+  const provider = toIntegrationProvider(payload.provider || event.headers?.["x-provider"]);
   const calls = Array.isArray(payload.calls) ? payload.calls : [];
   const message = asString(payload.message) || `Received ${provider} webhook`;
 
@@ -127,29 +137,28 @@ export async function handler(event: {
     const startedAt = toIsoDate(asString(callPayload.startedAt || callPayload.started_at || new Date().toISOString()));
     const dedupeHash = `${provider}:${externalCallId || callerNumber}:${startedAt}`;
 
+    const callValues: TablesInsert<"calls"> = {
+      organization_id: organizationId,
+      integration_id: integrationId,
+      publisher_id: publisherId,
+      campaign_id: campaignId,
+      external_call_id: externalCallId || null,
+      dedupe_hash: dedupeHash,
+      caller_number: callerNumber,
+      destination_number: asString(callPayload.destinationNumber || callPayload.destination_number) || null,
+      started_at: startedAt,
+      ended_at: asString(callPayload.endedAt || callPayload.ended_at) || null,
+      duration_seconds: Number(callPayload.durationSeconds || callPayload.duration_seconds || 0),
+      source_provider: provider,
+      current_disposition: asString(callPayload.currentDisposition || callPayload.current_disposition) || null,
+      source_status: "received",
+    };
+
     const callInsert = await admin
       .from("calls")
-      .upsert(
-        {
-          organization_id: organizationId,
-          integration_id: integrationId,
-          publisher_id: publisherId,
-          campaign_id: campaignId,
-          external_call_id: externalCallId || null,
-          dedupe_hash: dedupeHash,
-          caller_number: callerNumber,
-          destination_number: asString(callPayload.destinationNumber || callPayload.destination_number) || null,
-          started_at: startedAt,
-          ended_at: asString(callPayload.endedAt || callPayload.ended_at) || null,
-          duration_seconds: Number(callPayload.durationSeconds || callPayload.duration_seconds || 0),
-          source_provider: provider,
-          current_disposition: asString(callPayload.currentDisposition || callPayload.current_disposition) || null,
-          source_status: "received",
-        },
-        {
-          onConflict: "organization_id,dedupe_hash",
-        }
-      )
+      .upsert(callValues, {
+        onConflict: "organization_id,dedupe_hash",
+      })
       .select("id")
       .single();
 
@@ -159,14 +168,16 @@ export async function handler(event: {
 
     const callId = String((callInsert.data as Record<string, unknown>).id ?? "");
 
-    await admin.from("call_source_snapshots").insert({
+    const snapshotValues: TablesInsert<"call_source_snapshots"> = {
       organization_id: organizationId,
       call_id: callId,
       source_provider: provider,
       source_kind: "webhook",
-      raw_payload: callPayload,
-      normalized_payload: callPayload,
-    });
+      raw_payload: callPayload as Json,
+      normalized_payload: callPayload as Json,
+    };
+
+    await admin.from("call_source_snapshots").insert(snapshotValues);
 
     const transcriptText = asString(callPayload.transcriptText || callPayload.transcript_text);
     if (transcriptText) {

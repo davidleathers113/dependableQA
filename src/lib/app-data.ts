@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Json } from "../../supabase/types";
+import type { Database, Json } from "../../supabase/types";
 
 export type OrganizationRole = "owner" | "admin" | "reviewer" | "analyst" | "billing";
 export type ReviewStatus = "unreviewed" | "in_review" | "reviewed" | "reopened";
@@ -13,7 +13,7 @@ export interface OrganizationMembership {
 
 export interface CallFilters {
   search?: string;
-  reviewStatus?: string;
+  reviewStatus?: ReviewStatus;
   publisherId?: string;
   campaignId?: string;
   disposition?: string;
@@ -162,7 +162,129 @@ export interface IntegrationsSummary {
   integrations: IntegrationCard[];
 }
 
-type SupabaseAny = SupabaseClient<any>;
+export interface ReportsSummaryCard {
+  id: string;
+  title: string;
+  value: string;
+  trend: string;
+  description: string;
+}
+
+export interface ReportsPublisherBreakdown {
+  publisherId: string | null;
+  publisherName: string;
+  totalCalls: number;
+  flaggedCalls: number;
+  flagRate: number;
+}
+
+export interface ReportsRecentImport {
+  id: string;
+  filename: string;
+  status: string;
+  rowCountTotal: number;
+  rowCountRejected: number;
+  createdAt: string;
+}
+
+export interface ReportsSummary {
+  cards: ReportsSummaryCard[];
+  publisherBreakdown: ReportsPublisherBreakdown[];
+  recentImports: ReportsRecentImport[];
+  reviewVelocity: {
+    reviewsThisMonth: number;
+    reviewsPreviousMonth: number;
+    averagePerDay: number;
+  };
+}
+
+export interface ProfileSettingsData {
+  email: string;
+  firstName: string;
+  lastName: string;
+  avatarUrl: string | null;
+}
+
+export interface ProfileSettingsInput {
+  firstName: string;
+  lastName: string;
+  avatarUrl?: string | null;
+}
+
+export interface OrganizationSettingsData {
+  name: string;
+  slug: string;
+  timezone: string;
+  status: string;
+  billingEmail: string;
+}
+
+export interface OrganizationSettingsInput {
+  name: string;
+  slug: string;
+  timezone: string;
+  billingEmail: string;
+}
+
+export interface TeamMemberSummary {
+  id: string;
+  userId: string | null;
+  inviteEmail: string | null;
+  name: string;
+  email: string;
+  initials: string;
+  role: OrganizationRole;
+  inviteStatus: string;
+  createdAt: string;
+}
+
+export interface TeamSettingsData {
+  members: TeamMemberSummary[];
+}
+
+export interface ApiKeySummary {
+  id: string;
+  label: string;
+  tokenPrefix: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface ApiKeysData {
+  keys: ApiKeySummary[];
+}
+
+export interface AlertRuleSummary {
+  id: string;
+  name: string;
+  isEnabled: boolean;
+  triggerSummary: string;
+  destinationSummary: string;
+  cooldownMinutes: number;
+  createdAt: string;
+}
+
+export interface AlertRulesData {
+  rules: AlertRuleSummary[];
+}
+
+export interface AlertRuleInput {
+  name: string;
+  triggerSummary: string;
+  destinationSummary: string;
+  cooldownMinutes: number;
+  isEnabled: boolean;
+}
+
+export interface AiAssistantResponse {
+  answer: string;
+  references: string[];
+  followUps: string[];
+}
+
+type SupabaseAny = SupabaseClient<Database>;
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) {
@@ -205,6 +327,102 @@ function asBoolean(value: unknown) {
 
 function formatMonthStart(date = new Date()) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toISOString();
+}
+
+function formatMonthStartWithOffset(offset: number, date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + offset, 1)).toISOString();
+}
+
+function normalizeText(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function percentageChange(current: number, previous: number) {
+  if (previous === 0) {
+    return current === 0 ? 0 : 100;
+  }
+
+  return ((current - previous) / previous) * 100;
+}
+
+function formatPercent(value: number) {
+  return `${Number(value.toFixed(1))}%`;
+}
+
+function formatTrend(current: number, previous: number, noun: string) {
+  if (current === previous) {
+    return `Flat vs previous ${noun}`;
+  }
+
+  const change = Math.abs(percentageChange(current, previous));
+  const direction = current > previous ? "up" : "down";
+  return `${direction} ${formatPercent(change)} vs previous ${noun}`;
+}
+
+function getDispositionCategory(value: string | null | undefined) {
+  const normalized = normalizeText(value);
+  if (
+    normalized.includes("qualif") ||
+    normalized.includes("sale") ||
+    normalized.includes("book") ||
+    normalized.includes("close")
+  ) {
+    return "qualified";
+  }
+
+  if (
+    normalized.includes("disqual") ||
+    normalized.includes("reject") ||
+    normalized.includes("spam") ||
+    normalized.includes("no sale")
+  ) {
+    return "disqualified";
+  }
+
+  return "other";
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getAlertTriggerSummary(value: unknown) {
+  const config = asRecord(value);
+  return asString(config?.summary) || "Custom rule";
+}
+
+function getAlertDestinationSummary(value: unknown) {
+  const config = asRecord(value);
+  const summary = asString(config?.summary);
+  if (summary) {
+    return summary;
+  }
+
+  const destinations = config?.destinations;
+  if (!Array.isArray(destinations)) {
+    return "No destination configured";
+  }
+
+  const values = destinations
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+
+  return values.length > 0 ? values.join(", ") : "No destination configured";
+}
+
+function getInitials(name: string, email: string) {
+  const parts = name.split(" ").map((part) => part.trim()).filter((part) => part.length > 0);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return email.slice(0, 2).toUpperCase() || "NA";
 }
 
 function slugify(value: string) {
@@ -281,10 +499,18 @@ export function formatDuration(seconds: number) {
   return `${mins}m ${secs}s`;
 }
 
+function toReviewStatus(value: string | null): ReviewStatus | undefined {
+  if (value === "unreviewed" || value === "in_review" || value === "reviewed" || value === "reopened") {
+    return value;
+  }
+
+  return undefined;
+}
+
 export function buildCallFilters(searchParams: URLSearchParams): CallFilters {
   return {
     search: searchParams.get("search") ?? "",
-    reviewStatus: searchParams.get("reviewStatus") ?? "",
+    reviewStatus: toReviewStatus(searchParams.get("reviewStatus")),
     publisherId: searchParams.get("publisherId") ?? "",
     campaignId: searchParams.get("campaignId") ?? "",
     disposition: searchParams.get("disposition") ?? "",
@@ -918,6 +1144,604 @@ export async function getIntegrationsSummary(client: SupabaseAny, organizationId
       lastErrorAt: asNullableString(row.last_error_at),
       lastEventMessage: latestByIntegration.get(asString(row.id)) ?? null,
     })),
+  };
+}
+
+export async function getReportsSummary(client: SupabaseAny, organizationId: string): Promise<ReportsSummary> {
+  const monthStart = formatMonthStart();
+  const previousMonthStart = formatMonthStartWithOffset(-1);
+  const dayOfMonth = Math.max(new Date().getUTCDate(), 1);
+
+  const [
+    currentCallsResult,
+    previousCallsResult,
+    currentFlagsResult,
+    currentImportsResult,
+    previousImportsResult,
+    currentReviewsResult,
+    previousReviewsResult,
+  ] = await Promise.all([
+    client
+      .from("calls")
+      .select("id, publisher_id, current_disposition, flag_count")
+      .eq("organization_id", organizationId)
+      .gte("started_at", monthStart),
+    client
+      .from("calls")
+      .select("id, publisher_id, current_disposition, flag_count")
+      .eq("organization_id", organizationId)
+      .gte("started_at", previousMonthStart)
+      .lt("started_at", monthStart),
+    client
+      .from("call_flags")
+      .select("id, call_id, flag_category, status")
+      .eq("organization_id", organizationId)
+      .gte("created_at", monthStart),
+    client
+      .from("import_batches")
+      .select("id, filename, status, row_count_total, row_count_rejected, created_at")
+      .eq("organization_id", organizationId)
+      .gte("created_at", monthStart)
+      .order("created_at", { ascending: false })
+      .limit(10),
+    client
+      .from("import_batches")
+      .select("row_count_total, row_count_rejected")
+      .eq("organization_id", organizationId)
+      .gte("created_at", previousMonthStart)
+      .lt("created_at", monthStart),
+    client
+      .from("call_reviews")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .gte("created_at", monthStart),
+    client
+      .from("call_reviews")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .gte("created_at", previousMonthStart)
+      .lt("created_at", monthStart),
+  ]);
+
+  assertNoError(currentCallsResult.error, "Unable to load report calls.");
+  assertNoError(previousCallsResult.error, "Unable to load previous call data.");
+  assertNoError(currentFlagsResult.error, "Unable to load report flags.");
+  assertNoError(currentImportsResult.error, "Unable to load report imports.");
+  assertNoError(previousImportsResult.error, "Unable to load prior import data.");
+  assertNoError(currentReviewsResult.error, "Unable to load report reviews.");
+  assertNoError(previousReviewsResult.error, "Unable to load prior review data.");
+
+  const currentCalls = (currentCallsResult.data ?? []) as Array<Record<string, unknown>>;
+  const previousCalls = (previousCallsResult.data ?? []) as Array<Record<string, unknown>>;
+  const currentFlags = (currentFlagsResult.data ?? []) as Array<Record<string, unknown>>;
+  const currentImports = (currentImportsResult.data ?? []) as Array<Record<string, unknown>>;
+  const previousImports = (previousImportsResult.data ?? []) as Array<Record<string, unknown>>;
+  const currentReviews = (currentReviewsResult.data ?? []) as Array<Record<string, unknown>>;
+  const previousReviews = (previousReviewsResult.data ?? []) as Array<Record<string, unknown>>;
+
+  const uniquePublisherIds = Array.from(
+    new Set(
+      currentCalls
+        .map((row) => asString(row.publisher_id))
+        .filter((publisherId) => publisherId.length > 0)
+    )
+  );
+
+  const publishersResult = uniquePublisherIds.length
+    ? await client
+        .from("publishers")
+        .select("id, name")
+        .eq("organization_id", organizationId)
+        .in("id", uniquePublisherIds)
+    : { data: [], error: null };
+
+  assertNoError(publishersResult.error, "Unable to load report publishers.");
+
+  const publisherNames = new Map<string, string>();
+  for (const row of (publishersResult.data ?? []) as Array<Record<string, unknown>>) {
+    publisherNames.set(asString(row.id), asString(row.name));
+  }
+
+  const currentCallCount = currentCalls.length;
+  const previousCallCount = previousCalls.length;
+  const currentQualifiedCount = currentCalls.filter((row) => getDispositionCategory(asNullableString(row.current_disposition)) === "qualified").length;
+  const previousQualifiedCount = previousCalls.filter((row) => getDispositionCategory(asNullableString(row.current_disposition)) === "qualified").length;
+  const currentFlaggedCallCount = currentCalls.filter((row) => asNumber(row.flag_count) > 0).length;
+  const previousFlaggedCallCount = previousCalls.filter((row) => asNumber(row.flag_count) > 0).length;
+  const currentComplianceOpenFlags = currentFlags.filter((row) => normalizeText(asNullableString(row.flag_category)).includes("compliance") && asString(row.status) === "open").length;
+  const previousImportRejected = previousImports.reduce((total, row) => total + asNumber(row.row_count_rejected), 0);
+  const previousImportTotal = previousImports.reduce((total, row) => total + asNumber(row.row_count_total), 0);
+  const currentImportRejected = currentImports.reduce((total, row) => total + asNumber(row.row_count_rejected), 0);
+  const currentImportTotal = currentImports.reduce((total, row) => total + asNumber(row.row_count_total), 0);
+  const currentQualifiedRate = currentCallCount === 0 ? 0 : (currentQualifiedCount / currentCallCount) * 100;
+  const previousQualifiedRate = previousCallCount === 0 ? 0 : (previousQualifiedCount / previousCallCount) * 100;
+  const currentFlagRate = currentCallCount === 0 ? 0 : (currentFlaggedCallCount / currentCallCount) * 100;
+  const previousFlagRate = previousCallCount === 0 ? 0 : (previousFlaggedCallCount / previousCallCount) * 100;
+  const complianceRate = currentCallCount === 0 ? 100 : Math.max(0, 100 - (currentComplianceOpenFlags / currentCallCount) * 100);
+  const importRejectionRate = currentImportTotal === 0 ? 0 : (currentImportRejected / currentImportTotal) * 100;
+  const previousImportRejectionRate = previousImportTotal === 0 ? 0 : (previousImportRejected / previousImportTotal) * 100;
+
+  const publisherMetrics = new Map<string, { totalCalls: number; flaggedCalls: number }>();
+  for (const row of currentCalls) {
+    const publisherId = asNullableString(row.publisher_id) ?? "unassigned";
+    const current = publisherMetrics.get(publisherId) ?? { totalCalls: 0, flaggedCalls: 0 };
+    current.totalCalls += 1;
+    if (asNumber(row.flag_count) > 0) {
+      current.flaggedCalls += 1;
+    }
+    publisherMetrics.set(publisherId, current);
+  }
+
+  const cards: ReportsSummaryCard[] = [
+    {
+      id: "call-volume",
+      title: "Call Volume",
+      value: currentCallCount.toLocaleString(),
+      trend: formatTrend(currentCallCount, previousCallCount, "month"),
+      description: "Current month calls processed across all connected sources.",
+    },
+    {
+      id: "qualified-rate",
+      title: "Qualified Rate",
+      value: formatPercent(currentQualifiedRate),
+      trend: formatTrend(currentQualifiedRate, previousQualifiedRate, "month"),
+      description: "Share of calls with a disposition that looks qualified or sale-adjacent.",
+    },
+    {
+      id: "flag-rate",
+      title: "Flag Rate",
+      value: formatPercent(currentFlagRate),
+      trend: formatTrend(currentFlagRate, previousFlagRate, "month"),
+      description: "Share of current-month calls with at least one open flag.",
+    },
+    {
+      id: "compliance-rate",
+      title: "Compliance Rate",
+      value: formatPercent(complianceRate),
+      trend: `${currentComplianceOpenFlags.toLocaleString()} open compliance flags this month`,
+      description: "Derived from open compliance-category flags over current-month calls.",
+    },
+    {
+      id: "import-rejection-rate",
+      title: "Import Rejection Rate",
+      value: formatPercent(importRejectionRate),
+      trend: formatTrend(importRejectionRate, previousImportRejectionRate, "month"),
+      description: "Rejected rows over uploaded rows for batches created this month.",
+    },
+    {
+      id: "review-throughput",
+      title: "Review Throughput",
+      value: currentReviews.length.toLocaleString(),
+      trend: formatTrend(currentReviews.length, previousReviews.length, "month"),
+      description: "Completed review records created this month.",
+    },
+  ];
+
+  const publisherBreakdown = Array.from(publisherMetrics.entries())
+    .map(([publisherId, metrics]) => ({
+      publisherId: publisherId === "unassigned" ? null : publisherId,
+      publisherName:
+        publisherId === "unassigned"
+          ? "Unassigned"
+          : publisherNames.get(publisherId) ?? "Unknown Publisher",
+      totalCalls: metrics.totalCalls,
+      flaggedCalls: metrics.flaggedCalls,
+      flagRate: metrics.totalCalls === 0 ? 0 : Number(((metrics.flaggedCalls / metrics.totalCalls) * 100).toFixed(1)),
+    }))
+    .sort((left, right) => {
+      if (left.flaggedCalls !== right.flaggedCalls) {
+        return right.flaggedCalls - left.flaggedCalls;
+      }
+      return right.totalCalls - left.totalCalls;
+    })
+    .slice(0, 5);
+
+  return {
+    cards,
+    publisherBreakdown,
+    recentImports: currentImports.map((row) => ({
+      id: asString(row.id),
+      filename: asString(row.filename),
+      status: asString(row.status),
+      rowCountTotal: asNumber(row.row_count_total),
+      rowCountRejected: asNumber(row.row_count_rejected),
+      createdAt: asString(row.created_at),
+    })),
+    reviewVelocity: {
+      reviewsThisMonth: currentReviews.length,
+      reviewsPreviousMonth: previousReviews.length,
+      averagePerDay: Number((currentReviews.length / dayOfMonth).toFixed(1)),
+    },
+  };
+}
+
+export async function getProfileSettings(client: SupabaseAny, userId: string): Promise<ProfileSettingsData> {
+  const { data, error } = await client
+    .from("profiles")
+    .select("email, first_name, last_name, avatar_url")
+    .eq("id", userId)
+    .single();
+
+  assertNoError(error, "Unable to load profile settings.");
+
+  const profile = data as Record<string, unknown>;
+  return {
+    email: asString(profile.email),
+    firstName: asString(profile.first_name),
+    lastName: asString(profile.last_name),
+    avatarUrl: asNullableString(profile.avatar_url),
+  };
+}
+
+export async function updateProfileSettings(
+  client: SupabaseAny,
+  userId: string,
+  input: ProfileSettingsInput
+): Promise<ProfileSettingsData> {
+  const updates = {
+    first_name: input.firstName.trim(),
+    last_name: input.lastName.trim(),
+    avatar_url: asNullableString(input.avatarUrl),
+  };
+
+  const { data, error } = await client
+    .from("profiles")
+    .update(updates)
+    .eq("id", userId)
+    .select("email, first_name, last_name, avatar_url")
+    .single();
+
+  assertNoError(error, "Unable to update profile settings.");
+
+  const profile = data as Record<string, unknown>;
+  return {
+    email: asString(profile.email),
+    firstName: asString(profile.first_name),
+    lastName: asString(profile.last_name),
+    avatarUrl: asNullableString(profile.avatar_url),
+  };
+}
+
+export async function getOrganizationSettings(
+  client: SupabaseAny,
+  organizationId: string
+): Promise<OrganizationSettingsData> {
+  const [organizationResult, billingResult] = await Promise.all([
+    client
+      .from("organizations")
+      .select("name, slug, timezone, status")
+      .eq("id", organizationId)
+      .single(),
+    client
+      .from("billing_accounts")
+      .select("billing_email")
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+  ]);
+
+  assertNoError(organizationResult.error, "Unable to load organization settings.");
+  assertNoError(billingResult.error, "Unable to load billing contact.");
+
+  const organization = organizationResult.data as Record<string, unknown>;
+  const billing = (billingResult.data ?? null) as Record<string, unknown> | null;
+
+  return {
+    name: asString(organization.name),
+    slug: asString(organization.slug),
+    timezone: asString(organization.timezone) || "America/New_York",
+    status: asString(organization.status) || "active",
+    billingEmail: asString(billing?.billing_email),
+  };
+}
+
+export async function updateOrganizationSettings(
+  client: SupabaseAny,
+  organizationId: string,
+  input: OrganizationSettingsInput
+): Promise<OrganizationSettingsData> {
+  const organizationUpdate = await client
+    .from("organizations")
+    .update({
+      name: input.name.trim(),
+      slug: input.slug.trim(),
+      timezone: input.timezone.trim() || "America/New_York",
+    })
+    .eq("id", organizationId);
+
+  assertNoError(organizationUpdate.error, "Unable to update organization.");
+
+  const billingEmail = input.billingEmail.trim();
+  const billingResult = await client
+    .from("billing_accounts")
+    .upsert(
+      {
+        organization_id: organizationId,
+        billing_email: billingEmail || null,
+      },
+      { onConflict: "organization_id" }
+    );
+
+  assertNoError(billingResult.error, "Unable to update billing contact.");
+
+  return getOrganizationSettings(client, organizationId);
+}
+
+export async function getTeamSettings(client: SupabaseAny, organizationId: string): Promise<TeamSettingsData> {
+  const membersResult = await client
+    .from("organization_members")
+    .select("id, user_id, invite_email, role, invite_status, created_at")
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: true });
+
+  assertNoError(membersResult.error, "Unable to load organization members.");
+
+  const members = (membersResult.data ?? []) as Array<Record<string, unknown>>;
+  const userIds = Array.from(
+    new Set(members.map((row) => asString(row.user_id)).filter((userId) => userId.length > 0))
+  );
+
+  const profilesResult = userIds.length
+    ? await client.from("profiles").select("id, email, first_name, last_name").in("id", userIds)
+    : { data: [], error: null };
+
+  assertNoError(profilesResult.error, "Unable to load member profiles.");
+
+  const profilesById = new Map<string, Record<string, unknown>>();
+  for (const row of (profilesResult.data ?? []) as Array<Record<string, unknown>>) {
+    profilesById.set(asString(row.id), row);
+  }
+
+  return {
+    members: members.map((row) => {
+      const userId = asNullableString(row.user_id);
+      const profile = userId ? profilesById.get(userId) ?? null : null;
+      const firstName = asString(profile?.first_name);
+      const lastName = asString(profile?.last_name);
+      const profileName = `${firstName} ${lastName}`.trim();
+      const inviteEmail = asNullableString(row.invite_email);
+      const email = asString(profile?.email) || inviteEmail || "Pending invite";
+      const name = profileName || inviteEmail || "Pending Invite";
+
+      return {
+        id: asString(row.id),
+        userId,
+        inviteEmail,
+        name,
+        email,
+        initials: getInitials(name, email),
+        role: (asString(row.role) || "reviewer") as OrganizationRole,
+        inviteStatus: asString(row.invite_status) || "pending",
+        createdAt: asString(row.created_at),
+      };
+    }),
+  };
+}
+
+export async function inviteTeamMember(
+  client: SupabaseAny,
+  input: { organizationId: string; inviteEmail: string; role: OrganizationRole; invitedBy: string }
+) {
+  const { error } = await client.from("organization_members").insert({
+    organization_id: input.organizationId,
+    invite_email: input.inviteEmail.trim().toLowerCase(),
+    role: input.role,
+    invite_status: "pending",
+    invited_by: input.invitedBy,
+  });
+
+  assertNoError(error, "Unable to create team invite.");
+}
+
+export async function updateTeamMemberRole(
+  client: SupabaseAny,
+  input: { organizationId: string; memberId: string; role: OrganizationRole }
+) {
+  const { error } = await client
+    .from("organization_members")
+    .update({ role: input.role })
+    .eq("organization_id", input.organizationId)
+    .eq("id", input.memberId);
+
+  assertNoError(error, "Unable to update team member role.");
+}
+
+export async function getApiKeysData(client: SupabaseAny, organizationId: string): Promise<ApiKeysData> {
+  const { data, error } = await client
+    .from("api_keys")
+    .select("id, label, token_prefix, scopes, last_used_at, revoked_at, created_at")
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false });
+
+  assertNoError(error, "Unable to load API keys.");
+
+  return {
+    keys: ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      id: asString(row.id),
+      label: asString(row.label),
+      tokenPrefix: asString(row.token_prefix),
+      scopes: Array.isArray(row.scopes)
+        ? row.scopes.map((scope) => (typeof scope === "string" ? scope : "")).filter((scope) => scope.length > 0)
+        : [],
+      lastUsedAt: asNullableString(row.last_used_at),
+      revokedAt: asNullableString(row.revoked_at),
+      createdAt: asString(row.created_at),
+    })),
+  };
+}
+
+export async function getAlertRulesData(client: SupabaseAny, organizationId: string): Promise<AlertRulesData> {
+  const { data, error } = await client
+    .from("alert_rules")
+    .select("id, name, is_enabled, trigger_config, delivery_config, cooldown_minutes, created_at")
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false });
+
+  assertNoError(error, "Unable to load alert rules.");
+
+  return {
+    rules: ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      id: asString(row.id),
+      name: asString(row.name),
+      isEnabled: asBoolean(row.is_enabled),
+      triggerSummary: getAlertTriggerSummary(row.trigger_config),
+      destinationSummary: getAlertDestinationSummary(row.delivery_config),
+      cooldownMinutes: asNumber(row.cooldown_minutes),
+      createdAt: asString(row.created_at),
+    })),
+  };
+}
+
+export async function createAlertRule(
+  client: SupabaseAny,
+  input: AlertRuleInput & { organizationId: string; createdBy: string }
+) {
+  const { error } = await client.from("alert_rules").insert({
+    organization_id: input.organizationId,
+    name: input.name.trim(),
+    is_enabled: input.isEnabled,
+    cooldown_minutes: Math.max(0, input.cooldownMinutes),
+    trigger_config: {
+      summary: input.triggerSummary.trim(),
+    },
+    delivery_config: {
+      summary: input.destinationSummary.trim(),
+    },
+    created_by: input.createdBy,
+  });
+
+  assertNoError(error, "Unable to create alert rule.");
+}
+
+export async function updateAlertRule(
+  client: SupabaseAny,
+  input: AlertRuleInput & { organizationId: string; ruleId: string }
+) {
+  const { error } = await client
+    .from("alert_rules")
+    .update({
+      name: input.name.trim(),
+      is_enabled: input.isEnabled,
+      cooldown_minutes: Math.max(0, input.cooldownMinutes),
+      trigger_config: {
+        summary: input.triggerSummary.trim(),
+      },
+      delivery_config: {
+        summary: input.destinationSummary.trim(),
+      },
+    })
+    .eq("organization_id", input.organizationId)
+    .eq("id", input.ruleId);
+
+  assertNoError(error, "Unable to update alert rule.");
+}
+
+export async function setAlertRuleEnabled(
+  client: SupabaseAny,
+  input: { organizationId: string; ruleId: string; isEnabled: boolean }
+) {
+  const { error } = await client
+    .from("alert_rules")
+    .update({ is_enabled: input.isEnabled })
+    .eq("organization_id", input.organizationId)
+    .eq("id", input.ruleId);
+
+  assertNoError(error, "Unable to update alert status.");
+}
+
+export async function getAiAssistantAnswer(
+  client: SupabaseAny,
+  organizationId: string,
+  question: string
+): Promise<AiAssistantResponse> {
+  const normalizedQuestion = normalizeText(question);
+  const [overview, reports, imports, integrations] = await Promise.all([
+    getOverviewData(client, organizationId),
+    getReportsSummary(client, organizationId),
+    getImportsPageData(client, organizationId),
+    getIntegrationsSummary(client, organizationId),
+  ]);
+
+  if (
+    normalizedQuestion.includes("flag") ||
+    normalizedQuestion.includes("compliance")
+  ) {
+    const topPublisher = reports.publisherBreakdown[0];
+    return {
+      answer: topPublisher
+        ? `This month ${overview.openFlagCount} open flags need attention. The highest-risk publisher right now is ${topPublisher.publisherName} with ${topPublisher.flaggedCalls} flagged calls out of ${topPublisher.totalCalls} total calls (${formatPercent(topPublisher.flagRate)}).`
+        : `This month ${overview.openFlagCount} open flags need attention, and there is not enough publisher volume yet to identify a clear outlier.`,
+      references: ["Current month call flags", "Publisher flag breakdown", "Overview attention feed"],
+      followUps: [
+        "Show me recent flagged calls.",
+        "Which flags are still open by severity?",
+      ],
+    };
+  }
+
+  if (
+    normalizedQuestion.includes("publisher") ||
+    normalizedQuestion.includes("disqual") ||
+    normalizedQuestion.includes("qualified")
+  ) {
+    const topPublisher = reports.publisherBreakdown[0];
+    const qualifiedRateCard = reports.cards.find((card) => card.id === "qualified-rate");
+    return {
+      answer: topPublisher
+        ? `The most active publisher this month is ${topPublisher.publisherName}. Across the organization, the current qualified-rate snapshot is ${qualifiedRateCard?.value ?? "0%"} and ${topPublisher.publisherName} is carrying a ${formatPercent(topPublisher.flagRate)} flag rate.`
+        : `There is not enough publisher-tagged call volume yet to rank publishers. The organization-level qualified-rate snapshot is ${qualifiedRateCard?.value ?? "0%"}.`,
+      references: ["Reports qualified rate", "Publisher breakdown"],
+      followUps: [
+        "Show me the publishers with the most open flags.",
+        "How many calls were reviewed this month?",
+      ],
+    };
+  }
+
+  if (
+    normalizedQuestion.includes("import") ||
+    normalizedQuestion.includes("batch") ||
+    normalizedQuestion.includes("csv")
+  ) {
+    const latestBatch = imports.batches[0];
+    return {
+      answer: latestBatch
+        ? `The latest import batch is ${latestBatch.filename} with status ${latestBatch.status}. This month the import rejection rate is ${reports.cards.find((card) => card.id === "import-rejection-rate")?.value ?? "0%"} across ${reports.recentImports.length} recent batches.`
+        : "No import batches have been recorded for this organization yet.",
+      references: ["Recent import batches", "Import rejection rate"],
+      followUps: [
+        "Which batch had the most rejected rows?",
+        "Show me recent import errors.",
+      ],
+    };
+  }
+
+  if (
+    normalizedQuestion.includes("balance") ||
+    normalizedQuestion.includes("wallet") ||
+    normalizedQuestion.includes("billing")
+  ) {
+    return {
+      answer: `The current wallet balance is ${formatCurrency(overview.balanceCents)}. Based on recent usage, the projected runway is ${overview.projectedDaysRemaining ?? 0} days, and ${overview.needsAttention.length > 0 ? "there are active attention items on the dashboard." : "no urgent billing warnings are currently surfaced."}`,
+      references: ["Billing summary", "Overview projected runway"],
+      followUps: [
+        "How many minutes have we processed this month?",
+        "Show me recent billing activity.",
+      ],
+    };
+  }
+
+  const degradedIntegrations = integrations.integrations.filter(
+    (integration) => integration.status === "error" || integration.status === "degraded"
+  );
+
+  return {
+    answer: `This month the workspace has processed ${overview.callsThisMonth.toLocaleString()} calls and ${overview.minutesProcessed.toLocaleString()} minutes with a ${formatPercent(overview.flagRate)} flag rate. ${degradedIntegrations.length > 0 ? `${degradedIntegrations.length} integrations currently need attention.` : "All currently listed integrations are healthy."}`,
+    references: ["Overview KPIs", "Integration health", "Report summary cards"],
+    followUps: [
+      "Show me import health.",
+      "Summarize compliance risk.",
+      "Which publisher should I inspect first?",
+    ],
   };
 }
 

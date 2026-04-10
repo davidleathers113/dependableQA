@@ -1,4 +1,3 @@
-import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import { getIntegrationsSummary, type IntegrationsSummary } from "../../lib/app-data";

@@ -1,0 +1,36 @@
+---
+import "../../src/styles/globals.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} | DependableQA</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={`${title} | DependableQA`} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+    <div class="relative isolate overflow-hidden">
+      <div class="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.14),transparent_55%)]"></div>
+      <div class="pointer-events-none absolute inset-x-0 bottom-0 h-80 bg-[radial-gradient(circle_at_bottom,rgba(148,163,184,0.12),transparent_60%)]"></div>
+      <div class="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 sm:px-8 lg:px-10">
+        <slot name="navbar" />
+        <main class="flex flex-1 items-center justify-center py-10 sm:py-14">
+          <slot />
+        </main>
+        <slot name="footer" />
+      </div>
+    </div>
+  </body>
+</html>

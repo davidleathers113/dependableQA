@@ -8,4 +8,15 @@ const guides = defineCollection({
     })
 });
 
-export const collections = { guides };
+const updates = defineCollection({
+    loader: glob({ pattern: '**/*.md', base: './src/content/updates' }),
+    schema: z.object({
+        title: z.string(),
+        version: z.string(),
+        date: z.string(),
+        tag: z.string(),
+        summary: z.string(),
+    })
+});
+
+export const collections = { guides, updates };

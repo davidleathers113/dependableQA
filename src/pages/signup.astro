@@ -2,6 +2,7 @@
 export const prerender = false;
 import { getDefaultOrganizationId } from "../lib/app-data";
 import { setActiveOrganizationId } from "../lib/auth/active-organization";
+import AuthCard from "../components/auth/AuthCard.astro";
 import AuthLayout from "../layouts/AuthLayout.astro";
 
 const { session } = Astro.locals;
@@ -53,41 +54,50 @@ if (Astro.request.method === "POST") {
 }
 ---
 
-<AuthLayout title="Sign up">
-  <form method="POST" class="space-y-4">
-    {errorMessage && (
-      <div class="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-medium">
-        {errorMessage}
+<AuthLayout
+  title="Sign up"
+  description="Create your DependableQA account and start auditing call quality with a shared, secure workspace."
+>
+  <AuthCard
+    eyebrow="Create your workspace"
+    title="Create your DependableQA account"
+    description="Set up your account to review call quality, monitor imports, and start onboarding your team."
+  >
+    <form method="POST" class="space-y-5">
+      {errorMessage && (
+        <div class="rounded-2xl border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-sm font-medium text-rose-100">
+          {errorMessage}
+        </div>
+      )}
+      {successMessage && (
+        <div class="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200">
+          {successMessage}
+        </div>
+      )}
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="space-y-2">
+          <label for="first_name" class="text-sm font-medium text-slate-200">First name</label>
+          <input name="first_name" id="first_name" type="text" autocomplete="given-name" required class="flex h-12 w-full rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-300/60 focus:outline-none focus:ring-2 focus:ring-emerald-300/20" />
+        </div>
+        <div class="space-y-2">
+          <label for="last_name" class="text-sm font-medium text-slate-200">Last name</label>
+          <input name="last_name" id="last_name" type="text" autocomplete="family-name" required class="flex h-12 w-full rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-300/60 focus:outline-none focus:ring-2 focus:ring-emerald-300/20" />
+        </div>
       </div>
-    )}
-    {successMessage && (
-      <div class="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-medium">
-        {successMessage}
-      </div>
-    )}
-    <div class="grid grid-cols-2 gap-4">
       <div class="space-y-2">
-        <label for="first_name" class="text-sm font-medium leading-none">First name</label>
-        <input name="first_name" id="first_name" type="text" autocomplete="given-name" required class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
+        <label for="email" class="text-sm font-medium text-slate-200">Email</label>
+        <input name="email" id="email" type="email" autocomplete="email" required placeholder="you@company.com" class="flex h-12 w-full rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-300/60 focus:outline-none focus:ring-2 focus:ring-emerald-300/20" />
       </div>
       <div class="space-y-2">
-        <label for="last_name" class="text-sm font-medium leading-none">Last name</label>
-        <input name="last_name" id="last_name" type="text" autocomplete="family-name" required class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
+        <label for="password" class="text-sm font-medium text-slate-200">Password</label>
+        <input name="password" id="password" type="password" autocomplete="new-password" required class="flex h-12 w-full rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-300/60 focus:outline-none focus:ring-2 focus:ring-emerald-300/20" />
       </div>
-    </div>
-    <div class="space-y-2">
-      <label for="email" class="text-sm font-medium leading-none">Email</label>
-      <input name="email" id="email" type="email" autocomplete="email" required placeholder="name@example.com" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
-    </div>
-    <div class="space-y-2">
-      <label for="password" class="text-sm font-medium leading-none">Password</label>
-      <input name="password" id="password" type="password" autocomplete="new-password" required class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
-    </div>
-    <button type="submit" class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-neutral-100 text-neutral-900 hover:bg-neutral-100/90 h-10 px-4 py-2 w-full">
-      Create account
-    </button>
-    <div class="text-center text-sm text-neutral-400">
-      Already have an account? <a href="/login" class="text-white hover:underline">Log in</a>
-    </div>
-  </form>
+      <button type="submit" class="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition-colors hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-300/40 focus:ring-offset-2 focus:ring-offset-slate-900">
+        Create account
+      </button>
+      <p class="text-center text-sm text-slate-400">
+        Already have an account? <a href="/login" class="font-medium text-white hover:text-emerald-300">Log in</a>
+      </p>
+    </form>
+  </AuthCard>
 </AuthLayout>

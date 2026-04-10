@@ -1,4 +1,3 @@
-import * as React from "react";
 import type { CallFilterOptions, CallFilters } from "../../../lib/app-data";
 
 interface Props {
@@ -76,7 +75,7 @@ export function CallsToolbar({ filters, options, onChange }: Props) {
           onClick={() =>
             onChange({
               search: "",
-              reviewStatus: "",
+              reviewStatus: undefined,
               publisherId: "",
               campaignId: "",
               disposition: "",

@@ -1,8 +1,11 @@
 import { defineMiddleware } from "astro:middleware";
 import { createServerSupabaseClient } from "./lib/supabase/server-client";
 
-export const onRequest = defineMiddleware(async (context, next) => {
-  const supabase = createServerSupabaseClient(context.cookies);
+export async function handleAppRequest(
+  context: Parameters<Parameters<typeof defineMiddleware>[0]>[0],
+  next: Parameters<Parameters<typeof defineMiddleware>[0]>[1]
+) {
+  const supabase = createServerSupabaseClient(context.request, context.cookies);
 
   const {
     data: { session },
@@ -18,4 +21,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   return next();
-});
+}
+
+export const onRequest = defineMiddleware(handleAppRequest);

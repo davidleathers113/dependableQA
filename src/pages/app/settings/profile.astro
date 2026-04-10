@@ -2,11 +2,18 @@
 export const prerender = false;
 import AppLayout from '../../../layouts/AppLayout.astro';
 import ProfileSettingsPage from '../../../features/settings/ProfileSettingsPage';
+import { getProfileSettings } from '../../../lib/app-data';
 import { requireAppSession } from '../../../lib/auth/require-app-session';
 
 const session = await requireAppSession(Astro);
+const initialData = await getProfileSettings(Astro.locals.supabase, session.user.id);
 ---
 
 <AppLayout title="Profile Settings" session={session}>
-  <ProfileSettingsPage client:load organizationId={session.organization.id} />
+  <ProfileSettingsPage
+    client:load
+    organizationId={session.organization.id}
+    userId={session.user.id}
+    initialData={initialData}
+  />
 </AppLayout>

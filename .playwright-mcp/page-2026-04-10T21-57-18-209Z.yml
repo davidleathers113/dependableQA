@@ -1,0 +1,29 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - heading "DependableQA" [level=1] [ref=e4]
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - text: Email
+        - textbox "Email" [ref=e7]:
+          - /placeholder: name@example.com
+      - generic [ref=e8]:
+        - text: Password
+        - textbox "Password" [ref=e9]
+      - button "Log in" [ref=e10]
+      - generic [ref=e11]:
+        - text: Don't have an account?
+        - link "Sign up" [ref=e12] [cursor=pointer]:
+          - /url: /signup
+  - generic [ref=e15]:
+    - button "Menu" [ref=e16]:
+      - img [ref=e18]
+      - generic: Menu
+    - button "Inspect" [ref=e22]:
+      - img [ref=e24]
+      - generic: Inspect
+    - button "Audit" [ref=e26]:
+      - img [ref=e28]
+      - generic: Audit
+    - button "Settings" [ref=e31]:
+      - img [ref=e33]
+      - generic: Settings

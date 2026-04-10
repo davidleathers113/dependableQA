@@ -3,24 +3,62 @@ import "../../src/styles/globals.css";
 
 interface Props {
   title: string;
+  description?: string;
 }
 
-const { title } = Astro.props;
+const {
+  title,
+  description = "Securely access your DependableQA workspace.",
+} = Astro.props;
+const hasSidePanel = Astro.slots.has("side-panel");
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" class="h-full">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} | DependableQA</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={`${title} | DependableQA`} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
   </head>
-  <body class="antialiased bg-neutral-900 text-white flex items-center justify-center min-h-screen">
-    <main class="w-full max-w-md p-6">
-      <div class="mb-8 text-center">
-        <h1 class="text-2xl font-bold tracking-tight">DependableQA</h1>
+  <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+    <div class="relative isolate min-h-screen overflow-hidden">
+      <div class="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.16),transparent_58%)]"></div>
+      <div class="pointer-events-none absolute inset-y-0 left-0 w-80 bg-[radial-gradient(circle_at_left,rgba(14,165,233,0.08),transparent_62%)]"></div>
+      <div class="pointer-events-none absolute inset-x-0 bottom-0 h-80 bg-[radial-gradient(circle_at_bottom,rgba(148,163,184,0.1),transparent_60%)]"></div>
+
+      <div class="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-6 sm:px-8 sm:py-8 lg:px-10">
+        <header class="flex items-center">
+          <a href="/" class="inline-flex items-center gap-3 text-sm font-semibold tracking-tight text-white">
+            <span class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-400/10 text-base text-emerald-300">
+              D
+            </span>
+            <span>DependableQA</span>
+          </a>
+        </header>
+
+        <main class="flex flex-1 items-center py-8 sm:py-12">
+          <div class:list={[
+            "grid w-full items-center gap-10",
+            hasSidePanel
+              ? "lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]"
+              : "mx-auto max-w-xl",
+          ]}>
+            <div class="w-full">
+              <slot />
+            </div>
+
+            {hasSidePanel && (
+              <div class="hidden lg:block">
+                <slot name="side-panel" />
+              </div>
+            )}
+          </div>
+        </main>
       </div>
-      <slot />
-    </main>
+    </div>
   </body>
 </html>

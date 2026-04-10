@@ -1,4 +1,3 @@
-import * as React from "react";
 import type { CallListItem } from "../../../types/domain";
 
 interface Props {

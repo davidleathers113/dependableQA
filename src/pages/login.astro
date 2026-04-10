@@ -2,9 +2,35 @@
 export const prerender = false;
 import { getDefaultOrganizationId } from "../lib/app-data";
 import { setActiveOrganizationId } from "../lib/auth/active-organization";
+import AuthCard from "../components/auth/AuthCard.astro";
+import AuthSidePanel from "../components/auth/AuthSidePanel.astro";
+import LoginForm from "../components/auth/LoginForm";
 import AuthLayout from "../layouts/AuthLayout.astro";
 
+function normalizeLoginError(message: string) {
+  const normalizedMessage = message.trim().toLowerCase();
+
+  if (normalizedMessage.includes("invalid login credentials")) {
+    return "We couldn’t match that email and password. Double-check both and try again.";
+  }
+
+  if (normalizedMessage.includes("email not confirmed")) {
+    return "Confirm your email address from the link in your inbox, then try again.";
+  }
+
+  if (normalizedMessage.includes("rate limit")) {
+    return "Too many sign-in attempts just now. Wait a moment, then try again.";
+  }
+
+  if (normalizedMessage.includes("network")) {
+    return "We couldn’t reach the authentication service. Try again in a moment.";
+  }
+
+  return "We couldn’t log you in right now. Please try again.";
+}
+
 const { session } = Astro.locals;
+const resetSuccess = Astro.url.searchParams.get("reset") === "success";
 
 if (session) {
   const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, session.user.id);
@@ -17,11 +43,13 @@ if (session) {
 }
 
 let errorMessage = "";
+let submittedEmail = "";
 
 if (Astro.request.method === "POST") {
   const formData = await Astro.request.formData();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  submittedEmail = email;
 
   if (!email || !password) {
     errorMessage = "Email and password are required.";
@@ -32,7 +60,7 @@ if (Astro.request.method === "POST") {
     });
 
     if (error) {
-      errorMessage = error.message;
+      errorMessage = normalizeLoginError(error.message);
     } else {
       const {
         data: { session: nextSession },
@@ -54,26 +82,38 @@ if (Astro.request.method === "POST") {
 }
 ---
 
-<AuthLayout title="Log in">
-  <form method="POST" class="space-y-4">
-    {errorMessage && (
-      <div class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-        {errorMessage}
+<AuthLayout
+  title="Log in"
+  description="Access your DependableQA workspace to review call quality, investigate flagged traffic, and manage your account."
+>
+  <AuthCard
+    eyebrow="Secure workspace access"
+    title="Log in to DependableQA"
+    description="Access your workspace to review call quality, investigate flagged traffic, and manage your account."
+  >
+    {resetSuccess && (
+      <div class="mb-5 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200">
+        Your password has been updated. Log in with your new password to continue.
       </div>
     )}
-    <div class="space-y-2">
-      <label for="email" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Email</label>
-      <input id="email" name="email" type="email" autocomplete="email" placeholder="name@example.com" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
-    </div>
-    <div class="space-y-2">
-      <label for="password" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
-    </div>
-    <button type="submit" class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-neutral-100 text-neutral-900 hover:bg-neutral-100/90 h-10 px-4 py-2 w-full">
-      Log in
-    </button>
-    <div class="text-center text-sm text-neutral-400">
-      Don't have an account? <a href="/signup" class="text-white hover:underline">Sign up</a>
-    </div>
-  </form>
+
+    <LoginForm
+      client:load
+      action={Astro.url.pathname}
+      initialEmail={submittedEmail}
+      serverError={errorMessage}
+    />
+  </AuthCard>
+
+  <AuthSidePanel
+    slot="side-panel"
+    eyebrow="Auditable Call QA"
+    title="Review every decision with confidence."
+    description="Track imports, inspect AI classifications, and stay in control of your operation with a workspace built for operational clarity."
+    points={[
+      "Track every import across teams and workflows.",
+      "Audit every AI decision before it becomes a business risk.",
+      "Reclaim control over call quality with a clear review trail.",
+    ]}
+  />
 </AuthLayout>

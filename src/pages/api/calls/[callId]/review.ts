@@ -36,7 +36,7 @@ export const POST: APIRoute = async (context) => {
     });
   }
 
-  const supabase = createServerSupabaseClient(context.cookies);
+  const supabase = createServerSupabaseClient(context.request, context.cookies) as any;
   const admin = getAdminSupabase();
 
   const currentCall = await supabase

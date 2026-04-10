@@ -1,121 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database, TablesInsert } from "../../supabase/types";
 import { insertAuditLog, slugify } from "../lib/app-data";
+import { getImportBatchFinalStatus, parseCsv, type CsvRow } from "./import-csv";
 
-type SupabaseAny = SupabaseClient<any>;
-
-interface CsvRow {
-  [key: string]: string;
-}
+type SupabaseAny = SupabaseClient<Database>;
 
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
-}
-
-function normalizeHeader(value: string) {
-  return value.trim().toLowerCase().split(" ").join("_").split("-").join("_");
-}
-
-function parseCsvLine(text: string) {
-  const cells: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  let index = 0;
-
-  while (index < text.length) {
-    const character = text[index];
-    const next = index + 1 < text.length ? text[index + 1] : "";
-
-    if (character === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        index += 2;
-        continue;
-      }
-
-      inQuotes = !inQuotes;
-      index += 1;
-      continue;
-    }
-
-    if (character === "," && !inQuotes) {
-      cells.push(current);
-      current = "";
-      index += 1;
-      continue;
-    }
-
-    current += character;
-    index += 1;
-  }
-
-  cells.push(current);
-  return cells;
-}
-
-function parseCsv(text: string) {
-  const rows: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  let index = 0;
-
-  while (index < text.length) {
-    const character = text[index];
-    const next = index + 1 < text.length ? text[index + 1] : "";
-
-    if (character === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        index += 2;
-        continue;
-      }
-
-      inQuotes = !inQuotes;
-      current += character;
-      index += 1;
-      continue;
-    }
-
-    if ((character === "\n" || character === "\r") && !inQuotes) {
-      if (current.trim()) {
-        rows.push(current);
-      }
-      current = "";
-
-      if (character === "\r" && next === "\n") {
-        index += 2;
-      } else {
-        index += 1;
-      }
-      continue;
-    }
-
-    current += character;
-    index += 1;
-  }
-
-  if (current.trim()) {
-    rows.push(current);
-  }
-
-  if (rows.length === 0) {
-    return [];
-  }
-
-  const headers = parseCsvLine(rows[0]).map((header) => normalizeHeader(header));
-  const records: CsvRow[] = [];
-
-  for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
-    const cells = parseCsvLine(rows[rowIndex]);
-    const record: CsvRow = {};
-
-    for (let headerIndex = 0; headerIndex < headers.length; headerIndex += 1) {
-      record[headers[headerIndex]] = cells[headerIndex]?.trim() ?? "";
-    }
-
-    records.push(record);
-  }
-
-  return records;
 }
 
 function firstValue(record: CsvRow, keys: string[]) {
@@ -225,7 +116,7 @@ export async function dispatchImportBatch(
     throw new Error(batchResult.error?.message ?? "Batch not found.");
   }
 
-  const batch = batchResult.data as Record<string, unknown>;
+  const batch = batchResult.data;
 
   await client
     .from("import_batches")
@@ -279,25 +170,27 @@ export async function dispatchImportBatch(
       const campaignId = await ensureNamedEntity(client, "campaigns", options.organizationId, campaignName);
       const dedupeHash = `${asString(batch.source_provider)}:${externalCallId || callerNumber}:${startedAt}`;
 
+      const callPayload: TablesInsert<"calls"> = {
+        organization_id: options.organizationId,
+        import_batch_id: options.batchId,
+        publisher_id: publisherId,
+        campaign_id: campaignId,
+        external_call_id: externalCallId || null,
+        dedupe_hash: dedupeHash,
+        caller_number: callerNumber,
+        destination_number: destinationNumber || null,
+        started_at: startedAt,
+        ended_at: endedAt || null,
+        duration_seconds: durationSeconds,
+        source_provider: batch.source_provider,
+        current_disposition: disposition || null,
+        current_review_status: "unreviewed",
+        source_status: "received",
+      };
+
       const callInsert = await client
         .from("calls")
-        .insert({
-          organization_id: options.organizationId,
-          import_batch_id: options.batchId,
-          publisher_id: publisherId,
-          campaign_id: campaignId,
-          external_call_id: externalCallId || null,
-          dedupe_hash: dedupeHash,
-          caller_number: callerNumber,
-          destination_number: destinationNumber || null,
-          started_at: startedAt,
-          ended_at: endedAt || null,
-          duration_seconds: durationSeconds,
-          source_provider: asString(batch.source_provider),
-          current_disposition: disposition || null,
-          current_review_status: "unreviewed",
-          source_status: "received",
-        })
+        .insert(callPayload)
         .select("id")
         .single();
 
@@ -317,10 +210,10 @@ export async function dispatchImportBatch(
 
       const callId = asString((callInsert.data as Record<string, unknown>).id);
 
-      await client.from("call_source_snapshots").insert({
+      const snapshotPayload: TablesInsert<"call_source_snapshots"> = {
         organization_id: options.organizationId,
         call_id: callId,
-        source_provider: asString(batch.source_provider),
+        source_provider: batch.source_provider,
         source_kind: "csv",
         raw_payload: row,
         normalized_payload: {
@@ -334,7 +227,9 @@ export async function dispatchImportBatch(
           publisher_name: publisherName || null,
           disposition: disposition || null,
         },
-      });
+      };
+
+      await client.from("call_source_snapshots").insert(snapshotPayload);
 
       if (transcriptText) {
         await client.from("call_transcripts").insert({
@@ -360,7 +255,7 @@ export async function dispatchImportBatch(
     }
   }
 
-  const finalStatus = rejectedCount > 0 ? (acceptedCount > 0 ? "partial" : "failed") : "completed";
+  const finalStatus = getImportBatchFinalStatus(acceptedCount, rejectedCount);
 
   const updateResult = await client
     .from("import_batches")

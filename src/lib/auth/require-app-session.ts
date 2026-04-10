@@ -14,7 +14,7 @@ export interface AppSession {
  * Redirects to onboarding if no organization membership is found.
  */
 export async function requireAppSession(Astro: AstroGlobal): Promise<AppSession> {
-  const supabase = createServerSupabaseClient(Astro.cookies);
+  const supabase = createServerSupabaseClient(Astro.request, Astro.cookies);
 
   const {
     data: { session },

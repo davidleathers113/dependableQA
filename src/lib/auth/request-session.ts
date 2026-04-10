@@ -8,8 +8,11 @@ export interface RequestAppSession {
   organization: { id: string; name: string; role: string };
 }
 
-export async function resolveRequestAppSession(cookies: AstroCookies): Promise<RequestAppSession | null> {
-  const supabase = createServerSupabaseClient(cookies);
+export async function resolveRequestAppSession(
+  request: Request,
+  cookies: AstroCookies
+): Promise<RequestAppSession | null> {
+  const supabase = createServerSupabaseClient(request, cookies);
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -45,7 +48,7 @@ export async function resolveRequestAppSession(cookies: AstroCookies): Promise<R
 }
 
 export async function requireApiSession(context: APIContext) {
-  const session = await resolveRequestAppSession(context.cookies);
+  const session = await resolveRequestAppSession(context.request, context.cookies);
   if (!session) {
     return null;
   }

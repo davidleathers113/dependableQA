@@ -1,0 +1,15 @@
+- main [ref=e2]:
+  - heading "DependableQA" [level=1] [ref=e4]
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - text: Email
+      - textbox "Email" [ref=e7]:
+        - /placeholder: name@example.com
+    - generic [ref=e8]:
+      - text: Password
+      - textbox "Password" [ref=e9]
+    - button "Log in" [ref=e10]
+    - generic [ref=e11]:
+      - text: Don't have an account?
+      - link "Sign up" [ref=e12] [cursor=pointer]:
+        - /url: /signup

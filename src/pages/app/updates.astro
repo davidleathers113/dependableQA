@@ -1,12 +1,27 @@
 ---
 export const prerender = false;
+import { getCollection } from 'astro:content';
 import AppLayout from '../../layouts/AppLayout.astro';
 import UpdatesPage from '../../features/updates/UpdatesPage';
 import { requireAppSession } from '../../lib/auth/require-app-session';
 
 const session = await requireAppSession(Astro);
+const initialEntries = (await getCollection("updates"))
+  .map((entry) => ({
+    id: entry.id,
+    title: entry.data.title,
+    version: entry.data.version,
+    date: entry.data.date,
+    tag: entry.data.tag,
+    summary: entry.data.summary,
+  }))
+  .sort((left, right) => {
+    if (left.date < right.date) return 1;
+    if (left.date > right.date) return -1;
+    return 0;
+  });
 ---
 
 <AppLayout title="Updates" session={session}>
-  <UpdatesPage client:load organizationId={session.organization.id} />
+  <UpdatesPage client:load initialEntries={initialEntries} />
 </AppLayout>

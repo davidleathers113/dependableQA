@@ -3,7 +3,7 @@
 
 @layer base {
   a {
-    @apply hover:underline hover:underline-offset-2 hover:decoration-green-500;
+    @apply transition-colors;
   }
   td {
     @apply pt-4 pb-6;

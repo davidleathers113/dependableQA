@@ -1,0 +1,38 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - navigation [ref=e5]:
+        - link "D DependableQA" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e7]: D
+          - generic [ref=e8]: DependableQA
+        - link "Sign In" [ref=e9] [cursor=pointer]:
+          - /url: /login
+    - main [ref=e10]:
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: Auditable Call QA
+        - heading "Auditable Call QA Operations System" [level=1] [ref=e13]:
+          - text: Auditable Call QA
+          - generic [ref=e14]: Operations System
+        - paragraph [ref=e15]: Track every import, audit every AI decision, and take back control of call quality.
+        - generic [ref=e16]:
+          - link "Get Started" [ref=e17] [cursor=pointer]:
+            - /url: /signup
+          - link "Sign In" [ref=e18] [cursor=pointer]:
+            - /url: /login
+        - paragraph [ref=e19]: Built for brokers, networks, and agencies.
+    - contentinfo [ref=e20]:
+      - paragraph [ref=e22]: DependableQA
+  - generic [ref=e25]:
+    - button "Menu" [ref=e26]:
+      - img [ref=e28]
+      - generic: Menu
+    - button "Inspect" [ref=e32]:
+      - img [ref=e34]
+      - generic: Inspect
+    - button "Audit" [ref=e36]:
+      - img [ref=e38]
+      - generic: Audit
+    - button "Settings" [ref=e41]:
+      - img [ref=e43]
+      - generic: Settings
