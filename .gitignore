@@ -1,30 +1,77 @@
-# build output
-dist/
-# generated types
-.astro/
-
-# dependencies
+# Dependencies
 node_modules/
+.npm/
+.pnpm-store/
+.yarn/
 
-# logs
+# Build and framework output
+dist/
+.astro/
+coverage/
+*.tsbuildinfo
+
+# Local environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.*.local
+!.env-example
+!.env.example
+
+# Local platform and service state
+.netlify/
+.vercel/
+.turbo/
+.cache/
+tmp/
+temp/
+supabase/.branches/
+supabase/.temp/
+supabase/.cache/
+
+# Logs and test artifacts
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
+playwright-report/
+test-results/
 
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
 
-# environment variables
-.env
-.env.production
+# Credentials and secret material
+.envrc
+*.pem
+*.key
+*.p8
+*.p12
+*.crt
+*.cer
+*.jks
+*.keystore
+service-account*.json
+credentials*.json
+firebase-adminsdk*.json
 
-# macOS-specific files
+# Editor and OS files
 .DS_Store
-
-# jetbrains setting folder
 .idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 
-# Local Netlify folder
-.netlify
+# Local AI/editor state
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+.claude/
 
-# Supabase
-supabase/.temp
+# Merge leftovers
+*.orig

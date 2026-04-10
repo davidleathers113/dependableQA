@@ -2,7 +2,7 @@ Below is the build-ready implementation pack.
 
 I based this on the current ConvoQC structure you shared plus the Netlify Astro Supabase starter you chose. The starter is intentionally minimal: Astro + Netlify adapter + Tailwind v4 + Supabase JS, with a simple Astro layout and a single `src/utils/database.ts` helper. That is a good foundation, but for this product you should expand it into an SSR app shell with React islands, a proper domain-driven `src/features/*` structure, and separate browser/server/admin Supabase clients.
 
-One important starter change: the template currently uses `SUPABASE_DATABASE_URL` and `SUPABASE_ANON_KEY` from a server-side helper. Because your rebuilt app will use client-side React islands for tables, drawers, filters, and forms, switch to `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_ANON_KEY` for the browser client, and keep `SUPABASE_SERVICE_ROLE_KEY` server-only.
+One important starter change: the template currently uses `SUPABASE_DATABASE_URL` and `SUPABASE_ANON_KEY` from a server-side helper. Because your rebuilt app will use client-side React islands for tables, drawers, filters, and forms, standardize on `SUPABASE_URL` and `SUPABASE_ANON_KEY` for the app, keep `SUPABASE_SERVICE_ROLE_KEY` server-only, and accept `SUPABASE_DATABASE_URL` only as a Netlify compatibility fallback.
 
 ---
 
@@ -19,9 +19,12 @@ Update `astro.config.ts` to include React integration alongside the existing Net
 Recommended env contract:
 
 ```bash
-PUBLIC_SUPABASE_URL=
-PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+
+# Optional Netlify Supabase integration fallback
+# SUPABASE_DATABASE_URL=
 
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
@@ -1752,8 +1755,8 @@ let client: ReturnType<typeof createClient<Database>> | null = null;
 export function getBrowserSupabase() {
   if (!client) {
     client = createClient<Database>(
-      import.meta.env.PUBLIC_SUPABASE_URL,
-      import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+      import.meta.env.SUPABASE_URL,
+      import.meta.env.SUPABASE_ANON_KEY,
       {
         auth: {
           persistSession: true,
@@ -1776,7 +1779,7 @@ import type { Database } from '../../../supabase/types';
 
 export function getAdminSupabase() {
   return createClient<Database>(
-    process.env.PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
       auth: { autoRefreshToken: false, persistSession: false },

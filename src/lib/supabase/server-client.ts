@@ -1,11 +1,18 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import type { Database } from '../../../supabase/types'
 import type { AstroCookies } from 'astro'
+import { requirePublicSupabaseConfig } from "./config"
 
 export const createServerSupabaseClient = (cookies: AstroCookies) => {
+  const config = requirePublicSupabaseConfig({
+    url: process.env.SUPABASE_URL,
+    fallbackUrl: process.env.SUPABASE_DATABASE_URL,
+    anonKey: process.env.SUPABASE_ANON_KEY,
+  })
+
   return createServerClient<Database>(
-    import.meta.env.PUBLIC_SUPABASE_URL,
-    import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
+    config.url,
+    config.anonKey,
     {
       cookies: {
         get(key: string) {
