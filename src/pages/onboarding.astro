@@ -1,0 +1,76 @@
+---
+export const prerender = false;
+import { createOrganizationForUser, listUserOrganizations } from "../lib/app-data";
+import { setActiveOrganizationId } from "../lib/auth/active-organization";
+import { getAdminSupabase } from "../lib/supabase/admin-client";
+import AuthLayout from "../layouts/AuthLayout.astro";
+
+const { session } = Astro.locals;
+
+if (!session) {
+  return Astro.redirect("/login");
+}
+
+const existingOrganizations = await listUserOrganizations(Astro.locals.supabase, session.user.id);
+if (existingOrganizations.length > 0) {
+  setActiveOrganizationId(Astro.cookies, existingOrganizations[0].id);
+  return Astro.redirect("/app/overview");
+}
+
+let errorMessage = "";
+
+if (Astro.request.method === "POST") {
+  const formData = await Astro.request.formData();
+  const organizationName = String(formData.get("organization_name") ?? "").trim();
+
+  if (!organizationName) {
+    errorMessage = "Organization name is required.";
+  } else {
+    try {
+      const organization = await createOrganizationForUser(getAdminSupabase(), {
+        userId: session.user.id,
+        email: session.user.email ?? "",
+        organizationName,
+      });
+
+      setActiveOrganizationId(Astro.cookies, organization.id);
+      return Astro.redirect("/app/overview");
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : "Unable to complete onboarding.";
+    }
+  }
+}
+---
+
+<AuthLayout title="Set up workspace">
+  <form method="POST" class="space-y-5">
+    <div class="space-y-2">
+      <h2 class="text-xl font-semibold text-white">Create your first organization</h2>
+      <p class="text-sm text-neutral-400">
+        This workspace will hold your calls, imports, team members, and billing settings.
+      </p>
+    </div>
+
+    {errorMessage && (
+      <div class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        {errorMessage}
+      </div>
+    )}
+
+    <div class="space-y-2">
+      <label for="organization_name" class="text-sm font-medium leading-none">Organization name</label>
+      <input
+        id="organization_name"
+        name="organization_name"
+        type="text"
+        autocomplete="organization"
+        placeholder="Acme QA Operations"
+        class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2"
+      />
+    </div>
+
+    <button type="submit" class="inline-flex h-10 w-full items-center justify-center rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 transition-colors hover:bg-neutral-100/90">
+      Create organization
+    </button>
+  </form>
+</AuthLayout>

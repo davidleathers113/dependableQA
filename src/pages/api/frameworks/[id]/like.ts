@@ -3,6 +3,11 @@ import { supabase } from "../../../../utils/database";
 
 export const prerender = false;
 
+interface Framework {
+  id: string;
+  likes: number;
+}
+
 export const POST: APIRoute = async ({ params, redirect }) => {
   const { id } = params;
   if (!id) {
@@ -20,17 +25,19 @@ export const POST: APIRoute = async ({ params, redirect }) => {
       return new Response(`Where'd that pet go?`, { status: 404 });
     }
 
+    const typedFramework = framework as Framework;
+
     const { error: updateError } = await supabase
       .from("frameworks")
       .update({
-        likes: framework.likes + 1,
+        likes: typedFramework.likes + 1,
       })
-      .eq("id", framework.id);
+      .eq("id", typedFramework.id);
 
     if (updateError) {
       console.error(updateError);
     }
-    return redirect(`/frameworks/${framework.id}`, 303);
+    return redirect(`/frameworks/${typedFramework.id}`, 303);
   }
 
   return new Response("No supabase url provided", { status: 400 });

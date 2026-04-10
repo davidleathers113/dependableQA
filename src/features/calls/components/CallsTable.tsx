@@ -1,5 +1,5 @@
-import * as React from 'react';
-import type { CallListItem } from '../../../types/domain';
+import * as React from "react";
+import type { CallListItem } from "../../../types/domain";
 
 interface Props {
   rows: CallListItem[];
@@ -36,12 +36,13 @@ export function CallsTable({ rows, onRowClick }: Props) {
               <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px]">Disposition</th>
               <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px]">Review</th>
               <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px]">Flags</th>
+              <th className="px-6 py-4 font-semibold uppercase tracking-wider text-[10px] text-right">Detail</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center text-slate-500">
+                <td colSpan={9} className="px-6 py-12 text-center text-slate-500">
                   <div className="flex flex-col items-center space-y-2">
                     <span className="text-2xl">📁</span>
                     <p>No calls found yet. Import a batch or connect an integration.</p>
@@ -95,6 +96,15 @@ export function CallsTable({ rows, onRowClick }: Props) {
                     ) : (
                       <span className="text-slate-600">—</span>
                     )}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <a
+                      href={`/app/calls/${row.id}`}
+                      className="text-xs font-semibold text-violet-400 hover:text-violet-300"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Open Page
+                    </a>
                   </td>
                 </tr>
               ))

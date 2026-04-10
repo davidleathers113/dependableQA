@@ -1,22 +1,79 @@
 ---
+export const prerender = false;
+import { getDefaultOrganizationId } from "../lib/app-data";
+import { setActiveOrganizationId } from "../lib/auth/active-organization";
 import AuthLayout from "../layouts/AuthLayout.astro";
+
+const { session } = Astro.locals;
+
+if (session) {
+  const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, session.user.id);
+  if (organizationId) {
+    setActiveOrganizationId(Astro.cookies, organizationId);
+    return Astro.redirect("/app/overview");
+  }
+
+  return Astro.redirect("/onboarding");
+}
+
+let errorMessage = "";
+
+if (Astro.request.method === "POST") {
+  const formData = await Astro.request.formData();
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+
+  if (!email || !password) {
+    errorMessage = "Email and password are required.";
+  } else {
+    const { error } = await Astro.locals.supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      errorMessage = error.message;
+    } else {
+      const {
+        data: { session: nextSession },
+      } = await Astro.locals.supabase.auth.getSession();
+
+      if (!nextSession) {
+        errorMessage = "Signed in, but no session was returned. Try again.";
+      } else {
+        const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, nextSession.user.id);
+        if (organizationId) {
+          setActiveOrganizationId(Astro.cookies, organizationId);
+          return Astro.redirect("/app/overview");
+        }
+
+        return Astro.redirect("/onboarding");
+      }
+    }
+  }
+}
 ---
 
 <AuthLayout title="Log in">
-  <div class="space-y-4">
+  <form method="POST" class="space-y-4">
+    {errorMessage && (
+      <div class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        {errorMessage}
+      </div>
+    )}
     <div class="space-y-2">
       <label for="email" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Email</label>
-      <input id="email" type="email" placeholder="name@example.com" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+      <input id="email" name="email" type="email" autocomplete="email" placeholder="name@example.com" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
     </div>
     <div class="space-y-2">
       <label for="password" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Password</label>
-      <input id="password" type="password" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+      <input id="password" name="password" type="password" autocomplete="current-password" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
     </div>
-    <button class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-neutral-100 text-neutral-900 hover:bg-neutral-100/90 h-10 px-4 py-2 w-full">
+    <button type="submit" class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-neutral-100 text-neutral-900 hover:bg-neutral-100/90 h-10 px-4 py-2 w-full">
       Log in
     </button>
     <div class="text-center text-sm text-neutral-400">
       Don't have an account? <a href="/signup" class="text-white hover:underline">Sign up</a>
     </div>
-  </div>
+  </form>
 </AuthLayout>

@@ -1,4 +1,6 @@
 import type { AstroGlobal } from "astro";
+import { getDefaultOrganizationId, listUserOrganizations } from "../app-data";
+import { getActiveOrganizationId, setActiveOrganizationId } from "./active-organization";
 import { createServerSupabaseClient } from "../supabase/server-client";
 
 export interface AppSession {
@@ -22,21 +24,23 @@ export async function requireAppSession(Astro: AstroGlobal): Promise<AppSession>
     throw Astro.redirect("/login");
   }
 
-  // Resolve active organization
-  // In a real app, you might store the active org ID in a cookie or resolve the first one
-  const { data: membership, error } = await supabase
-    .from("organization_members")
-    .select("role, organization:organizations(id, name)")
-    .eq("user_id", session.user.id)
-    .limit(1)
-    .single();
+  const activeOrganizationId = await getDefaultOrganizationId(
+    supabase,
+    session.user.id,
+    getActiveOrganizationId(Astro.cookies)
+  );
 
-  if (error || !membership) {
-    // No organization found - redirect to onboarding/creation
-    // For now, redirect to a placeholder or let the app handle it
-    // throw Astro.redirect("/onboarding");
-    // Returning a dummy for scaffold purposes if needed, but better to enforce
-    throw Astro.redirect("/login?error=no_org");
+  if (!activeOrganizationId) {
+    throw Astro.redirect("/onboarding");
+  }
+
+  setActiveOrganizationId(Astro.cookies, activeOrganizationId);
+
+  const organizations = await listUserOrganizations(supabase, session.user.id);
+  const membership = organizations.find((organization) => organization.id === activeOrganizationId);
+
+  if (!membership) {
+    throw Astro.redirect("/onboarding");
   }
 
   return {
@@ -45,8 +49,8 @@ export async function requireAppSession(Astro: AstroGlobal): Promise<AppSession>
       email: session.user.email!,
     },
     organization: {
-      id: (membership.organization as any).id,
-      name: (membership.organization as any).name,
+      id: membership.id,
+      name: membership.name,
       role: membership.role,
     },
   };

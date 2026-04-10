@@ -4,6 +4,15 @@ interface ImportMetaEnv {
   readonly PUBLIC_SUPABASE_URL: string;
   readonly PUBLIC_SUPABASE_ANON_KEY: string;
   readonly SUPABASE_SERVICE_ROLE_KEY: string;
+  readonly STRIPE_SECRET_KEY: string;
+  readonly STRIPE_WEBHOOK_SECRET: string;
+  readonly STRIPE_PLATFORM_PRICE_ID: string;
+  readonly APP_URL: string;
+  readonly NETLIFY_SITE_URL: string;
+  readonly DEFAULT_RECHARGE_THRESHOLD_CENTS: string;
+  readonly DEFAULT_RECHARGE_AMOUNT_CENTS: string;
+  readonly DEFAULT_PER_MINUTE_RATE_CENTS: string;
+  readonly APP_ENCRYPTION_KEY: string;
 }
 
 interface ImportMeta {

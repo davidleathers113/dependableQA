@@ -1,32 +1,93 @@
 ---
+export const prerender = false;
+import { getDefaultOrganizationId } from "../lib/app-data";
+import { setActiveOrganizationId } from "../lib/auth/active-organization";
 import AuthLayout from "../layouts/AuthLayout.astro";
+
+const { session } = Astro.locals;
+
+if (session) {
+  const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, session.user.id);
+  if (organizationId) {
+    setActiveOrganizationId(Astro.cookies, organizationId);
+    return Astro.redirect("/app/overview");
+  }
+
+  return Astro.redirect("/onboarding");
+}
+
+let errorMessage = "";
+let successMessage = "";
+
+if (Astro.request.method === "POST") {
+  const formData = await Astro.request.formData();
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const firstName = String(formData.get("first_name") ?? "").trim();
+  const lastName = String(formData.get("last_name") ?? "").trim();
+
+  if (email && password && firstName && lastName) {
+    const redirectUrl = new URL("/onboarding", Astro.url);
+    const { data, error } = await Astro.locals.supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: redirectUrl.toString(),
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+        },
+      },
+    });
+
+    if (error) {
+      errorMessage = error.message;
+    } else if (data.session) {
+      return Astro.redirect("/onboarding");
+    } else {
+      successMessage = "Account created. Check your email to confirm your address, then continue onboarding.";
+    }
+  } else {
+    errorMessage = "First name, last name, email, and password are required.";
+  }
+}
 ---
 
 <AuthLayout title="Sign up">
-  <div class="space-y-4">
+  <form method="POST" class="space-y-4">
+    {errorMessage && (
+      <div class="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-medium">
+        {errorMessage}
+      </div>
+    )}
+    {successMessage && (
+      <div class="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-medium">
+        {successMessage}
+      </div>
+    )}
     <div class="grid grid-cols-2 gap-4">
       <div class="space-y-2">
         <label for="first_name" class="text-sm font-medium leading-none">First name</label>
-        <input id="first_name" type="text" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+        <input name="first_name" id="first_name" type="text" autocomplete="given-name" required class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
       </div>
       <div class="space-y-2">
         <label for="last_name" class="text-sm font-medium leading-none">Last name</label>
-        <input id="last_name" type="text" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+        <input name="last_name" id="last_name" type="text" autocomplete="family-name" required class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
       </div>
     </div>
     <div class="space-y-2">
       <label for="email" class="text-sm font-medium leading-none">Email</label>
-      <input id="email" type="email" placeholder="name@example.com" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+      <input name="email" id="email" type="email" autocomplete="email" required placeholder="name@example.com" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
     </div>
     <div class="space-y-2">
       <label for="password" class="text-sm font-medium leading-none">Password</label>
-      <input id="password" type="password" class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+      <input name="password" id="password" type="password" autocomplete="new-password" required class="flex h-10 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm ring-offset-background placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2" />
     </div>
-    <button class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-neutral-100 text-neutral-900 hover:bg-neutral-100/90 h-10 px-4 py-2 w-full">
+    <button type="submit" class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-neutral-100 text-neutral-900 hover:bg-neutral-100/90 h-10 px-4 py-2 w-full">
       Create account
     </button>
     <div class="text-center text-sm text-neutral-400">
       Already have an account? <a href="/login" class="text-white hover:underline">Log in</a>
     </div>
-  </div>
+  </form>
 </AuthLayout>

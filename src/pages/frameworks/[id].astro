@@ -4,6 +4,15 @@ import { supabase } from "../../utils/database";
 
 export const prerender = false;
 
+interface Framework {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  logo: string;
+  likes: number;
+}
+
 const { id } = Astro.params;
 
 if (!id) {
@@ -11,14 +20,14 @@ if (!id) {
 }
 
 // Fetch pet data from Supabase if connection is set up
-let framework;
+let framework: Framework | null = null;
 if (supabase) {
   const { data, error } = await supabase
     .from("frameworks")
     .select("*")
     .eq("id", id)
     .single();
-  framework = data ? data : null;
+  framework = data ? (data as Framework) : null;
   if (error || !framework) {
     console.error(error);
     throw new Error("No framework found");

@@ -1,53 +1,36 @@
-import * as React from 'react';
-import { CallsToolbar } from './components/CallsToolbar';
-import { CallsTable } from './components/CallsTable';
-import { CallDetailDrawer } from './components/CallDetailDrawer';
-import type { CallListItem } from '../../types/domain';
+import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { QueryProvider } from "../../components/providers/QueryProvider";
+import { filtersToSearchParams, getCallsPageData, type CallsPageData } from "../../lib/app-data";
+import { getBrowserSupabase } from "../../lib/supabase/browser-client";
+import { CallsToolbar } from "./components/CallsToolbar";
+import { CallsTable } from "./components/CallsTable";
+import { CallDetailDrawer } from "./components/CallDetailDrawer";
 
 interface Props {
   organizationId: string;
   userId: string;
+  initialData: CallsPageData;
 }
 
-export default function CallsPage({ organizationId }: Props) {
+function CallsPageInner({ organizationId, initialData }: Props) {
   const [selectedCallId, setSelectedCallId] = React.useState<string | null>(null);
-  const [rows, setRows] = React.useState<CallListItem[]>([]);
+  const [filters, setFilters] = React.useState(initialData.filters);
+
+  const callsQuery = useQuery({
+    queryKey: ["calls", organizationId, filters],
+    queryFn: () => getCallsPageData(getBrowserSupabase(), organizationId, filters),
+    initialData,
+  });
 
   React.useEffect(() => {
-    // TODO: replace with TanStack Query + server-backed filters
-    void organizationId;
-    // Dummy data for now
-    setRows([
-      {
-        id: '1',
-        callerNumber: '+1 234 567 8901',
-        startedAt: '2026-04-10T14:22:00Z',
-        durationSeconds: 272,
-        campaignName: 'WhiteRock Legal',
-        publisherName: 'LeadGen Pro',
-        currentDisposition: 'Sale',
-        currentReviewStatus: 'unreviewed',
-        flagCount: 0,
-        topFlag: null,
-        sourceProvider: 'ringba',
-        importBatchId: 'batch_1'
-      },
-      {
-        id: '2',
-        callerNumber: '+1 987 654 3210',
-        startedAt: '2026-04-10T13:45:00Z',
-        durationSeconds: 120,
-        campaignName: 'Solar Direct',
-        publisherName: 'SolarFlow',
-        currentDisposition: 'Disqualified',
-        currentReviewStatus: 'reviewed',
-        flagCount: 2,
-        topFlag: 'Compliance',
-        sourceProvider: 'trackdrive',
-        importBatchId: null
-      }
-    ]);
-  }, [organizationId]);
+    const params = filtersToSearchParams(filters);
+    const target = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, "", target);
+  }, [filters]);
+
+  const rows = callsQuery.data.rows;
+  const options = callsQuery.data.options;
 
   return (
     <section className="space-y-6">
@@ -60,7 +43,7 @@ export default function CallsPage({ organizationId }: Props) {
         </div>
       </header>
 
-      <CallsToolbar organizationId={organizationId} />
+      <CallsToolbar filters={filters} options={options} onChange={setFilters} />
 
       <CallsTable
         rows={rows}
@@ -76,5 +59,13 @@ export default function CallsPage({ organizationId }: Props) {
         }}
       />
     </section>
+  );
+}
+
+export default function CallsPage(props: Props) {
+  return (
+    <QueryProvider>
+      <CallsPageInner {...props} />
+    </QueryProvider>
   );
 }

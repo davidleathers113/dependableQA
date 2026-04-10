@@ -1,0 +1,12 @@
+---
+export const prerender = false;
+import AppLayout from '../../../layouts/AppLayout.astro';
+import ApiSettingsPage from '../../../features/settings/ApiSettingsPage';
+import { requireAppSession } from '../../../lib/auth/require-app-session';
+
+const session = await requireAppSession(Astro);
+---
+
+<AppLayout title="API Settings" session={session}>
+  <ApiSettingsPage client:load organizationId={session.organization.id} />
+</AppLayout>

@@ -1,0 +1,12 @@
+---
+export const prerender = false;
+import AppLayout from '../../../layouts/AppLayout.astro';
+import AlertSettingsPage from '../../../features/settings/AlertSettingsPage';
+import { requireAppSession } from '../../../lib/auth/require-app-session';
+
+const session = await requireAppSession(Astro);
+---
+
+<AppLayout title="Alert Settings" session={session}>
+  <AlertSettingsPage client:load organizationId={session.organization.id} />
+</AppLayout>

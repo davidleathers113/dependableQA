@@ -1,8 +1,11 @@
 ---
-import type { Tables } from "../../supabase/types.ts";
-
 interface Props {
-  framework: Tables<"frameworks">;
+  framework: {
+    id: string;
+    name: string;
+    logo: string;
+    likes: number;
+  };
 }
 
 const { framework } = Astro.props;

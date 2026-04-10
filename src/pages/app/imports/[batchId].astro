@@ -1,0 +1,25 @@
+---
+export const prerender = false;
+import AppLayout from "../../../layouts/AppLayout.astro";
+import ImportBatchDetailPage from "../../../features/imports/ImportBatchDetailPage";
+import { getImportBatchDetail } from "../../../lib/app-data";
+import { requireAppSession } from "../../../lib/auth/require-app-session";
+
+const session = await requireAppSession(Astro);
+const batchId = Astro.params.batchId;
+
+if (!batchId) {
+  return Astro.redirect("/app/imports");
+}
+
+const initialData = await getImportBatchDetail(Astro.locals.supabase, session.organization.id, batchId);
+---
+
+<AppLayout title="Import Detail" session={session}>
+  <ImportBatchDetailPage
+    client:load
+    organizationId={session.organization.id}
+    batchId={batchId}
+    initialData={initialData}
+  />
+</AppLayout>

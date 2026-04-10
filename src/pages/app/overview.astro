@@ -1,9 +1,12 @@
 ---
+export const prerender = false;
 import AppLayout from '../../layouts/AppLayout.astro';
 import OverviewPage from '../../features/overview/OverviewPage';
+import { getOverviewData } from '../../lib/app-data';
 import { requireAppSession } from '../../lib/auth/require-app-session';
 
 const session = await requireAppSession(Astro);
+const initialData = await getOverviewData(Astro.locals.supabase, session.organization.id);
 ---
 
 <AppLayout title="Overview" session={session}>
@@ -11,5 +14,6 @@ const session = await requireAppSession(Astro);
     client:load
     organizationId={session.organization.id}
     userId={session.user.id}
+    initialData={initialData}
   />
 </AppLayout>
