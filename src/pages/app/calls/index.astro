@@ -1,0 +1,49 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+---
+
+<AppLayout title="Calls">
+  <div class="space-y-6">
+    <!-- Header Controls -->
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-4">
+        <button class="px-3 py-1.5 rounded-md bg-neutral-800 text-sm font-medium border border-neutral-700">Filter</button>
+        <button class="px-3 py-1.5 rounded-md bg-neutral-800 text-sm font-medium border border-neutral-700">Today</button>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button class="px-3 py-1.5 rounded-md bg-neutral-800 text-sm font-medium border border-neutral-700">Export</button>
+        <button class="px-4 py-1.5 rounded-md bg-white text-neutral-900 text-sm font-bold">Import Calls</button>
+      </div>
+    </div>
+
+    <!-- Calls Table Placeholder -->
+    <div class="rounded-lg border border-neutral-800 bg-neutral-900 overflow-hidden">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-neutral-800/50 border-b border-neutral-800">
+          <tr>
+            <th class="px-4 py-3 font-medium text-neutral-400">Date/Time</th>
+            <th class="px-4 py-3 font-medium text-neutral-400">Caller</th>
+            <th class="px-4 py-3 font-medium text-neutral-400">Campaign</th>
+            <th class="px-4 py-3 font-medium text-neutral-400">Disposition</th>
+            <th class="px-4 py-3 font-medium text-neutral-400 text-right">Duration</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-neutral-800">
+          {[1,2,3,4,5].map(_ => (
+            <tr class="hover:bg-neutral-800/30 cursor-pointer transition-colors">
+              <td class="px-4 py-4 whitespace-nowrap">Apr 10, 14:22</td>
+              <td class="px-4 py-4 font-mono">+1 234 567 8901</td>
+              <td class="px-4 py-4">WhiteRock Legal</td>
+              <td class="px-4 py-4">
+                <span class="px-2 py-0.5 rounded-full bg-green-950/30 text-green-500 border border-green-900/50 text-[10px] uppercase font-bold tracking-wider">
+                  Sale
+                </span>
+              </td>
+              <td class="px-4 py-4 text-right tabular-nums">4m 32s</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</AppLayout>

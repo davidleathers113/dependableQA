@@ -1,0 +1,26 @@
+---
+import "../../src/styles/globals.css";
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} | DependableQA</title>
+  </head>
+  <body class="antialiased bg-neutral-900 text-white flex items-center justify-center min-h-screen">
+    <main class="w-full max-w-md p-6">
+      <div class="mb-8 text-center">
+        <h1 class="text-2xl font-bold tracking-tight">DependableQA</h1>
+      </div>
+      <slot />
+    </main>
+  </body>
+</html>
