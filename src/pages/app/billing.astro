@@ -1,0 +1,11 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import BillingPage from '../../features/billing/BillingPage';
+import { requireAppSession } from '../../lib/auth/require-app-session';
+
+const session = await requireAppSession(Astro);
+---
+
+<AppLayout title="Billing" session={session}>
+  <BillingPage client:load organizationId={session.organization.id} />
+</AppLayout>

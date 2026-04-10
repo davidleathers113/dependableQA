@@ -1,0 +1,11 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import IntegrationsPage from '../../features/integrations/IntegrationsPage';
+import { requireAppSession } from '../../lib/auth/require-app-session';
+
+const session = await requireAppSession(Astro);
+---
+
+<AppLayout title="Integrations" session={session}>
+  <IntegrationsPage client:load organizationId={session.organization.id} />
+</AppLayout>
