@@ -1,9 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../../supabase/types";
+import {
+  getPublicIntegrationWebhookAuth,
+  type IntegrationWebhookDefaults,
+  type PublicIntegrationEvent,
+  type PublicIntegrationWebhookAuth,
+} from "./integration-config";
 
 export type OrganizationRole = "owner" | "admin" | "reviewer" | "analyst" | "billing";
 export type ReviewStatus = "unreviewed" | "in_review" | "reviewed" | "reopened";
 export type IntegrationProvider = "ringba" | "retreaver" | "trackdrive" | "custom";
+export type CallSortBy = "startedAt" | "durationSeconds" | "flagCount" | "updatedAt";
+export type CallSortDirection = "asc" | "desc";
+export type CallTableDensity = "comfortable" | "compact";
 
 export interface OrganizationMembership {
   id: string;
@@ -19,6 +28,10 @@ export interface CallFilters {
   disposition?: string;
   dateFrom?: string;
   dateTo?: string;
+  flaggedOnly?: boolean;
+  flagCategory?: string;
+  sortBy?: CallSortBy;
+  sortDirection?: CallSortDirection;
 }
 
 export interface CallListItem {
@@ -34,6 +47,9 @@ export interface CallListItem {
   topFlag: string | null;
   sourceProvider: IntegrationProvider;
   importBatchId: string | null;
+  importBatchFilename: string | null;
+  reviewedByName: string | null;
+  lastUpdatedAt: string;
 }
 
 export interface CallFlagItem {
@@ -41,7 +57,9 @@ export interface CallFlagItem {
   title: string;
   severity: "low" | "medium" | "high" | "critical";
   status: "open" | "dismissed" | "confirmed";
+  category: string;
   description: string | null;
+  evidenceSummary: string[];
 }
 
 export interface CallHistoryItem {
@@ -64,14 +82,22 @@ export interface CallDetail {
   currentDisposition: string | null;
   currentReviewStatus: ReviewStatus;
   flagCount: number;
+  topFlag: string | null;
+  severitySummary: string | null;
   sourceProvider: IntegrationProvider;
   importBatchId: string | null;
+  importBatchFilename: string | null;
   sourceStatus: string;
   transcriptText: string | null;
   transcriptSegments: Array<{ speaker: string; text: string; start?: number; end?: number }>;
   analysisSummary: string | null;
   suggestedDisposition: string | null;
   analysisConfidence: number | null;
+  analysisModelName: string | null;
+  analysisVersion: string | null;
+  analysisStructuredOutput: Json | null;
+  latestReviewNotes: string | null;
+  latestReviewedByName: string | null;
   flags: CallFlagItem[];
   history: CallHistoryItem[];
 }
@@ -86,6 +112,35 @@ export interface CallsPageData {
   rows: CallListItem[];
   filters: CallFilters;
   options: CallFilterOptions;
+  summary: CallsSummary;
+}
+
+export interface CallsSummary {
+  totalCalls: number;
+  flaggedCalls: number;
+  needsReviewCount: number;
+  complianceFlagCount: number;
+  qualifiedCount: number;
+  disqualifiedCount: number;
+  topFlaggedPublisher: {
+    publisherId: string | null;
+    publisherName: string;
+    flaggedCalls: number;
+    totalCalls: number;
+  } | null;
+}
+
+export interface SavedViewSummary {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  config: CallSavedViewConfig;
+}
+
+export interface CallSavedViewConfig {
+  filters: CallFilters;
+  density?: CallTableDensity;
+  visibleColumns?: string[];
 }
 
 export interface OverviewData {
@@ -156,6 +211,9 @@ export interface IntegrationCard {
   lastSuccessAt: string | null;
   lastErrorAt: string | null;
   lastEventMessage: string | null;
+  lastEventSeverity: string | null;
+  webhookAuth: PublicIntegrationWebhookAuth;
+  recentEvents: PublicIntegrationEvent[];
 }
 
 export interface IntegrationsSummary {
@@ -321,6 +379,10 @@ function asNumber(value: unknown) {
   return 0;
 }
 
+function asArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
 function asBoolean(value: unknown) {
   return value === true;
 }
@@ -335,6 +397,10 @@ function formatMonthStartWithOffset(offset: number, date = new Date()) {
 
 function normalizeText(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? "";
+}
+
+function normalizeBoolean(value: unknown) {
+  return value === true;
 }
 
 function percentageChange(current: number, previous: number) {
@@ -539,6 +605,25 @@ export function formatDuration(seconds: number) {
   return `${mins}m ${secs}s`;
 }
 
+const DEFAULT_CALL_FILTERS: Required<
+  Pick<CallFilters, "search" | "publisherId" | "campaignId" | "disposition" | "dateFrom" | "dateTo" | "flagCategory" | "sortBy" | "sortDirection">
+> &
+  Pick<CallFilters, "reviewStatus" | "flaggedOnly"> = {
+  search: "",
+  reviewStatus: undefined,
+  publisherId: "",
+  campaignId: "",
+  disposition: "",
+  dateFrom: "",
+  dateTo: "",
+  flaggedOnly: false,
+  flagCategory: "",
+  sortBy: "startedAt",
+  sortDirection: "desc",
+};
+
+export { DEFAULT_CALL_FILTERS };
+
 function toReviewStatus(value: string | null): ReviewStatus | undefined {
   if (value === "unreviewed" || value === "in_review" || value === "reviewed" || value === "reopened") {
     return value;
@@ -547,8 +632,45 @@ function toReviewStatus(value: string | null): ReviewStatus | undefined {
   return undefined;
 }
 
-export function buildCallFilters(searchParams: URLSearchParams): CallFilters {
+function toCallSortBy(value: string | null): CallSortBy | undefined {
+  if (
+    value === "startedAt" ||
+    value === "durationSeconds" ||
+    value === "flagCount" ||
+    value === "updatedAt"
+  ) {
+    return value;
+  }
+
+  return undefined;
+}
+
+function toCallSortDirection(value: string | null): CallSortDirection | undefined {
+  if (value === "asc" || value === "desc") {
+    return value;
+  }
+
+  return undefined;
+}
+
+export function normalizeCallFilters(filters: CallFilters): CallFilters {
   return {
+    search: asString(filters.search).trim(),
+    reviewStatus: toReviewStatus(filters.reviewStatus ?? null),
+    publisherId: asString(filters.publisherId).trim(),
+    campaignId: asString(filters.campaignId).trim(),
+    disposition: asString(filters.disposition).trim(),
+    dateFrom: asString(filters.dateFrom).trim(),
+    dateTo: asString(filters.dateTo).trim(),
+    flaggedOnly: normalizeBoolean(filters.flaggedOnly),
+    flagCategory: asString(filters.flagCategory).trim(),
+    sortBy: filters.sortBy ?? DEFAULT_CALL_FILTERS.sortBy,
+    sortDirection: filters.sortDirection ?? DEFAULT_CALL_FILTERS.sortDirection,
+  };
+}
+
+export function buildCallFilters(searchParams: URLSearchParams): CallFilters {
+  return normalizeCallFilters({
     search: searchParams.get("search") ?? "",
     reviewStatus: toReviewStatus(searchParams.get("reviewStatus")),
     publisherId: searchParams.get("publisherId") ?? "",
@@ -556,17 +678,59 @@ export function buildCallFilters(searchParams: URLSearchParams): CallFilters {
     disposition: searchParams.get("disposition") ?? "",
     dateFrom: searchParams.get("dateFrom") ?? "",
     dateTo: searchParams.get("dateTo") ?? "",
-  };
+    flaggedOnly: searchParams.get("flaggedOnly") === "true",
+    flagCategory: searchParams.get("flagCategory") ?? "",
+    sortBy: toCallSortBy(searchParams.get("sortBy")),
+    sortDirection: toCallSortDirection(searchParams.get("sortDirection")),
+  });
 }
 
 export function filtersToSearchParams(filters: CallFilters) {
+  const normalized = normalizeCallFilters(filters);
   const params = new URLSearchParams();
 
-  for (const [key, rawValue] of Object.entries(filters)) {
-    const value = typeof rawValue === "string" ? rawValue.trim() : "";
-    if (value) {
-      params.set(key, value);
-    }
+  if (normalized.search) {
+    params.set("search", normalized.search);
+  }
+
+  if (normalized.reviewStatus) {
+    params.set("reviewStatus", normalized.reviewStatus);
+  }
+
+  if (normalized.publisherId) {
+    params.set("publisherId", normalized.publisherId);
+  }
+
+  if (normalized.campaignId) {
+    params.set("campaignId", normalized.campaignId);
+  }
+
+  if (normalized.disposition) {
+    params.set("disposition", normalized.disposition);
+  }
+
+  if (normalized.dateFrom) {
+    params.set("dateFrom", normalized.dateFrom);
+  }
+
+  if (normalized.dateTo) {
+    params.set("dateTo", normalized.dateTo);
+  }
+
+  if (normalized.flaggedOnly) {
+    params.set("flaggedOnly", "true");
+  }
+
+  if (normalized.flagCategory) {
+    params.set("flagCategory", normalized.flagCategory);
+  }
+
+  if (normalized.sortBy && normalized.sortBy !== DEFAULT_CALL_FILTERS.sortBy) {
+    params.set("sortBy", normalized.sortBy);
+  }
+
+  if (normalized.sortDirection && normalized.sortDirection !== DEFAULT_CALL_FILTERS.sortDirection) {
+    params.set("sortDirection", normalized.sortDirection);
   }
 
   return params;
@@ -651,6 +815,341 @@ async function searchCallIds(client: SupabaseAny, organizationId: string, rawSea
   return Array.from(ids);
 }
 
+async function getFlagFilteredCallIds(client: SupabaseAny, organizationId: string, filters: CallFilters) {
+  const normalized = normalizeCallFilters(filters);
+  if (!normalized.flaggedOnly && !normalized.flagCategory) {
+    return null;
+  }
+
+  let query = client
+    .from("call_flags")
+    .select("call_id")
+    .eq("organization_id", organizationId)
+    .eq("status", "open");
+
+  if (normalized.flagCategory) {
+    query = query.eq("flag_category", normalized.flagCategory);
+  }
+
+  const { data, error } = await query;
+  assertNoError(error, "Unable to load flag filters.");
+
+  const ids = new Set<string>();
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const id = asString(row.call_id);
+    if (id) {
+      ids.add(id);
+    }
+  }
+
+  return Array.from(ids);
+}
+
+function intersectCallIds(...groups: Array<string[] | null>) {
+  const populated = groups.filter((group): group is string[] => Array.isArray(group));
+  if (populated.length === 0) {
+    return null;
+  }
+
+  let current = new Set(populated[0]);
+  for (const group of populated.slice(1)) {
+    const next = new Set(group);
+    current = new Set(Array.from(current).filter((id) => next.has(id)));
+  }
+
+  return Array.from(current);
+}
+
+function getSeverityRank(value: string) {
+  if (value === "critical") return 4;
+  if (value === "high") return 3;
+  if (value === "medium") return 2;
+  return 1;
+}
+
+function buildEvidenceSummary(value: unknown) {
+  const evidence = asRecord(value);
+  if (!evidence) {
+    return [] as string[];
+  }
+
+  const entries = Object.entries(evidence)
+    .map(([key, rawValue]) => {
+      if (typeof rawValue === "string" && rawValue.trim()) {
+        return `${key}: ${rawValue.trim()}`;
+      }
+
+      if (typeof rawValue === "number" || typeof rawValue === "boolean") {
+        return `${key}: ${String(rawValue)}`;
+      }
+
+      if (Array.isArray(rawValue) && rawValue.length > 0) {
+        const values = rawValue
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter((item) => item.length > 0);
+        if (values.length > 0) {
+          return `${key}: ${values.join(", ")}`;
+        }
+      }
+
+      return "";
+    })
+    .filter((entry) => entry.length > 0);
+
+  return entries.slice(0, 3);
+}
+
+function getDisplayName(profile: Record<string, unknown> | null) {
+  if (!profile) {
+    return null;
+  }
+
+  const fullName = `${asString(profile.first_name)} ${asString(profile.last_name)}`.trim();
+  if (fullName) {
+    return fullName;
+  }
+
+  return asNullableString(profile.email);
+}
+
+async function getCallTopFlags(
+  client: SupabaseAny,
+  organizationId: string,
+  callIds: string[]
+) {
+  if (callIds.length === 0) {
+    return new Map<string, string>();
+  }
+
+  const { data, error } = await client
+    .from("call_flags")
+    .select("call_id, title, severity, status, created_at")
+    .eq("organization_id", organizationId)
+    .in("call_id", callIds)
+    .order("created_at", { ascending: false });
+
+  assertNoError(error, "Unable to load top flags.");
+
+  const topFlags = new Map<string, { title: string; severity: string; status: string; createdAt: string }>();
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const callId = asString(row.call_id);
+    if (!callId) {
+      continue;
+    }
+
+    const candidate = {
+      title: asString(row.title),
+      severity: asString(row.severity),
+      status: asString(row.status),
+      createdAt: asString(row.created_at),
+    };
+
+    const existing = topFlags.get(callId);
+    if (!existing) {
+      topFlags.set(callId, candidate);
+      continue;
+    }
+
+    const existingStatusRank = existing.status === "open" ? 1 : 0;
+    const candidateStatusRank = candidate.status === "open" ? 1 : 0;
+    const existingSeverityRank = getSeverityRank(existing.severity);
+    const candidateSeverityRank = getSeverityRank(candidate.severity);
+
+    if (
+      candidateStatusRank > existingStatusRank ||
+      (candidateStatusRank === existingStatusRank && candidateSeverityRank > existingSeverityRank) ||
+      (candidateStatusRank === existingStatusRank &&
+        candidateSeverityRank === existingSeverityRank &&
+        candidate.createdAt > existing.createdAt)
+    ) {
+      topFlags.set(callId, candidate);
+    }
+  }
+
+  return new Map(Array.from(topFlags.entries()).map(([callId, flag]) => [callId, flag.title || null]));
+}
+
+async function getLatestReviewers(
+  client: SupabaseAny,
+  organizationId: string,
+  callIds: string[]
+) {
+  if (callIds.length === 0) {
+    return new Map<string, string | null>();
+  }
+
+  const reviewsResult = await client
+    .from("call_reviews")
+    .select("call_id, reviewed_by, created_at")
+    .eq("organization_id", organizationId)
+    .in("call_id", callIds)
+    .order("created_at", { ascending: false });
+
+  assertNoError(reviewsResult.error, "Unable to load call reviewers.");
+
+  const latestByCall = new Map<string, string>();
+  for (const row of (reviewsResult.data ?? []) as Array<Record<string, unknown>>) {
+    const callId = asString(row.call_id);
+    const reviewerId = asString(row.reviewed_by);
+    if (callId && reviewerId && !latestByCall.has(callId)) {
+      latestByCall.set(callId, reviewerId);
+    }
+  }
+
+  const reviewerIds = Array.from(new Set(Array.from(latestByCall.values())));
+  if (reviewerIds.length === 0) {
+    return new Map();
+  }
+
+  const profilesResult = await client
+    .from("profiles")
+    .select("id, first_name, last_name, email")
+    .in("id", reviewerIds);
+
+  assertNoError(profilesResult.error, "Unable to load reviewer names.");
+
+  const profilesById = new Map<string, Record<string, unknown>>();
+  for (const row of (profilesResult.data ?? []) as Array<Record<string, unknown>>) {
+    const id = asString(row.id);
+    if (id) {
+      profilesById.set(id, row);
+    }
+  }
+
+  return new Map(
+    Array.from(latestByCall.entries()).map(([callId, reviewerId]) => [
+      callId,
+      getDisplayName(profilesById.get(reviewerId) ?? null),
+    ])
+  );
+}
+
+async function getCallsSummary(
+  client: SupabaseAny,
+  organizationId: string,
+  filters: CallFilters,
+  matchingIds: string[] | null
+): Promise<CallsSummary> {
+  const normalized = normalizeCallFilters(filters);
+  let query = client
+    .from("calls")
+    .select("id, publisher_id, current_disposition, current_review_status, flag_count")
+    .eq("organization_id", organizationId);
+
+  if (normalized.reviewStatus) {
+    query = query.eq("current_review_status", normalized.reviewStatus);
+  }
+
+  if (normalized.publisherId) {
+    query = query.eq("publisher_id", normalized.publisherId);
+  }
+
+  if (normalized.campaignId) {
+    query = query.eq("campaign_id", normalized.campaignId);
+  }
+
+  if (normalized.disposition) {
+    query = query.eq("current_disposition", normalized.disposition);
+  }
+
+  if (normalized.dateFrom) {
+    query = query.gte("started_at", normalized.dateFrom);
+  }
+
+  if (normalized.dateTo) {
+    query = query.lte("started_at", normalized.dateTo);
+  }
+
+  if (matchingIds && matchingIds.length > 0) {
+    query = query.in("id", matchingIds);
+  }
+
+  const { data, error } = await query.limit(500);
+  assertNoError(error, "Unable to load calls summary.");
+
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const callIds = rows.map((row) => asString(row.id)).filter((id) => id.length > 0);
+
+  const complianceResult = callIds.length
+    ? await client
+        .from("call_flags")
+        .select("call_id, flag_category")
+        .eq("organization_id", organizationId)
+        .eq("status", "open")
+        .in("call_id", callIds)
+    : { data: [], error: null };
+
+  assertNoError(complianceResult.error, "Unable to load compliance flags.");
+
+  const publisherMetrics = new Map<string, { totalCalls: number; flaggedCalls: number }>();
+  for (const row of rows) {
+    const publisherId = asNullableString(row.publisher_id) ?? "unassigned";
+    const metrics = publisherMetrics.get(publisherId) ?? { totalCalls: 0, flaggedCalls: 0 };
+    metrics.totalCalls += 1;
+    if (asNumber(row.flag_count) > 0) {
+      metrics.flaggedCalls += 1;
+    }
+    publisherMetrics.set(publisherId, metrics);
+  }
+
+  const publisherIds = Array.from(publisherMetrics.keys()).filter((publisherId) => publisherId !== "unassigned");
+  const publishersResult = publisherIds.length
+    ? await client
+        .from("publishers")
+        .select("id, name")
+        .eq("organization_id", organizationId)
+        .in("id", publisherIds)
+    : { data: [], error: null };
+
+  assertNoError(publishersResult.error, "Unable to load publisher summary.");
+
+  const publisherNames = new Map<string, string>();
+  for (const row of (publishersResult.data ?? []) as Array<Record<string, unknown>>) {
+    publisherNames.set(asString(row.id), asString(row.name));
+  }
+
+  const topFlaggedPublisher = Array.from(publisherMetrics.entries())
+    .map(([publisherId, metrics]) => ({
+      publisherId: publisherId === "unassigned" ? null : publisherId,
+      publisherName: publisherId === "unassigned" ? "Unassigned" : publisherNames.get(publisherId) ?? "Unknown Publisher",
+      flaggedCalls: metrics.flaggedCalls,
+      totalCalls: metrics.totalCalls,
+    }))
+    .sort((left, right) => {
+      if (left.flaggedCalls !== right.flaggedCalls) {
+        return right.flaggedCalls - left.flaggedCalls;
+      }
+      return right.totalCalls - left.totalCalls;
+    })[0] ?? null;
+
+  return {
+    totalCalls: rows.length,
+    flaggedCalls: rows.filter((row) => asNumber(row.flag_count) > 0).length,
+    needsReviewCount: rows.filter((row) => asString(row.current_review_status) !== "reviewed").length,
+    complianceFlagCount: ((complianceResult.data ?? []) as Array<Record<string, unknown>>).filter((row) =>
+      normalizeText(asNullableString(row.flag_category)).includes("compliance")
+    ).length,
+    qualifiedCount: rows.filter((row) => getDispositionCategory(asNullableString(row.current_disposition)) === "qualified").length,
+    disqualifiedCount: rows.filter((row) => getDispositionCategory(asNullableString(row.current_disposition)) === "disqualified").length,
+    topFlaggedPublisher,
+  };
+}
+
+function getSavedViewConfig(value: unknown): CallSavedViewConfig {
+  const config = asRecord(value);
+  const filters = normalizeCallFilters(asRecord(config?.filters) ?? {});
+  const density = config?.density === "compact" ? "compact" : "comfortable";
+  const visibleColumns = asArray(config?.visibleColumns)
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+
+  return {
+    filters,
+    density,
+    visibleColumns,
+  };
+}
+
 export async function getCallFilterOptions(client: SupabaseAny, organizationId: string): Promise<CallFilterOptions> {
   const [publishersResult, campaignsResult, callsResult] = await Promise.all([
     client
@@ -697,61 +1196,87 @@ export async function getCallFilterOptions(client: SupabaseAny, organizationId: 
 }
 
 export async function getCallsPageData(client: SupabaseAny, organizationId: string, filters: CallFilters): Promise<CallsPageData> {
+  const normalizedFilters = normalizeCallFilters(filters);
   const optionsPromise = getCallFilterOptions(client, organizationId);
-  const matchingIds = await searchCallIds(client, organizationId, filters.search ?? "");
+  const [searchIds, flagIds] = await Promise.all([
+    searchCallIds(client, organizationId, normalizedFilters.search ?? ""),
+    getFlagFilteredCallIds(client, organizationId, normalizedFilters),
+  ]);
+  const matchingIds = intersectCallIds(searchIds, flagIds);
+  const summaryPromise = getCallsSummary(client, organizationId, normalizedFilters, matchingIds);
 
   if (matchingIds && matchingIds.length === 0) {
     return {
       rows: [],
-      filters,
+      filters: normalizedFilters,
       options: await optionsPromise,
+      summary: await summaryPromise,
     };
   }
 
   let query = client
     .from("calls")
-    .select("id, caller_number, started_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, campaigns(name), publishers(name)")
+    .select("id, caller_number, started_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, updated_at, campaigns(name), publishers(name), import_batches(filename)")
     .eq("organization_id", organizationId)
-    .order("started_at", { ascending: false })
     .limit(100);
 
-  if (filters.reviewStatus) {
-    query = query.eq("current_review_status", filters.reviewStatus);
+  if (normalizedFilters.reviewStatus) {
+    query = query.eq("current_review_status", normalizedFilters.reviewStatus);
   }
 
-  if (filters.publisherId) {
-    query = query.eq("publisher_id", filters.publisherId);
+  if (normalizedFilters.publisherId) {
+    query = query.eq("publisher_id", normalizedFilters.publisherId);
   }
 
-  if (filters.campaignId) {
-    query = query.eq("campaign_id", filters.campaignId);
+  if (normalizedFilters.campaignId) {
+    query = query.eq("campaign_id", normalizedFilters.campaignId);
   }
 
-  if (filters.disposition) {
-    query = query.eq("current_disposition", filters.disposition);
+  if (normalizedFilters.disposition) {
+    query = query.eq("current_disposition", normalizedFilters.disposition);
   }
 
-  if (filters.dateFrom) {
-    query = query.gte("started_at", filters.dateFrom);
+  if (normalizedFilters.dateFrom) {
+    query = query.gte("started_at", normalizedFilters.dateFrom);
   }
 
-  if (filters.dateTo) {
-    query = query.lte("started_at", filters.dateTo);
+  if (normalizedFilters.dateTo) {
+    query = query.lte("started_at", normalizedFilters.dateTo);
   }
 
   if (matchingIds && matchingIds.length > 0) {
     query = query.in("id", matchingIds);
   }
 
+  if (normalizedFilters.sortBy === "durationSeconds") {
+    query = query.order("duration_seconds", { ascending: normalizedFilters.sortDirection === "asc" });
+  } else if (normalizedFilters.sortBy === "flagCount") {
+    query = query.order("flag_count", { ascending: normalizedFilters.sortDirection === "asc" });
+  } else if (normalizedFilters.sortBy === "updatedAt") {
+    query = query.order("updated_at", { ascending: normalizedFilters.sortDirection === "asc" });
+  } else {
+    query = query.order("started_at", { ascending: normalizedFilters.sortDirection === "asc" });
+  }
+
   const { data, error } = await query;
   assertNoError(error, "Unable to load calls.");
+
+  const callIds = ((data ?? []) as Array<Record<string, unknown>>)
+    .map((row) => asString(row.id))
+    .filter((id) => id.length > 0);
+  const [topFlagsByCall, reviewersByCall] = await Promise.all([
+    getCallTopFlags(client, organizationId, callIds),
+    getLatestReviewers(client, organizationId, callIds),
+  ]);
 
   const rows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
     const campaign = row.campaigns as Record<string, unknown> | null;
     const publisher = row.publishers as Record<string, unknown> | null;
+    const importBatch = row.import_batches as Record<string, unknown> | null;
+    const callId = asString(row.id);
 
     return {
-      id: asString(row.id),
+      id: callId,
       callerNumber: asString(row.caller_number),
       startedAt: asString(row.started_at),
       durationSeconds: asNumber(row.duration_seconds),
@@ -760,16 +1285,20 @@ export async function getCallsPageData(client: SupabaseAny, organizationId: stri
       currentDisposition: asNullableString(row.current_disposition),
       currentReviewStatus: (asString(row.current_review_status) || "unreviewed") as ReviewStatus,
       flagCount: asNumber(row.flag_count),
-      topFlag: null,
+      topFlag: topFlagsByCall.get(callId) ?? null,
       sourceProvider: (asString(row.source_provider) || "custom") as IntegrationProvider,
       importBatchId: asNullableString(row.import_batch_id),
+      importBatchFilename: asNullableString(importBatch?.filename),
+      reviewedByName: reviewersByCall.get(callId) ?? null,
+      lastUpdatedAt: asString(row.updated_at),
     } satisfies CallListItem;
   });
 
   return {
     rows,
-    filters,
+    filters: normalizedFilters,
     options: await optionsPromise,
+    summary: await summaryPromise,
   };
 }
 
@@ -777,7 +1306,7 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
   const [callResult, transcriptResult, analysisResult, flagsResult, reviewsResult, overridesResult, auditResult] = await Promise.all([
     client
       .from("calls")
-      .select("id, caller_number, destination_number, started_at, ended_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, source_status, campaigns(name), publishers(name)")
+      .select("id, caller_number, destination_number, started_at, ended_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, source_status, campaigns(name), publishers(name), import_batches(filename)")
       .eq("organization_id", organizationId)
       .eq("id", callId)
       .single(),
@@ -789,7 +1318,7 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
       .maybeSingle(),
     client
       .from("call_analyses")
-      .select("summary, disposition_suggested, confidence, model_name, created_at")
+      .select("summary, disposition_suggested, confidence, model_name, analysis_version, structured_output, created_at")
       .eq("organization_id", organizationId)
       .eq("call_id", callId)
       .order("created_at", { ascending: false })
@@ -797,13 +1326,13 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
       .maybeSingle(),
     client
       .from("call_flags")
-      .select("id, title, severity, status, description, created_at")
+      .select("id, title, severity, status, description, flag_category, evidence, created_at")
       .eq("organization_id", organizationId)
       .eq("call_id", callId)
       .order("created_at", { ascending: false }),
     client
       .from("call_reviews")
-      .select("id, review_status, final_disposition, review_notes, created_at")
+      .select("id, review_status, final_disposition, review_notes, reviewed_by, created_at")
       .eq("organization_id", organizationId)
       .eq("call_id", callId)
       .order("created_at", { ascending: false }),
@@ -843,8 +1372,20 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
 
   const campaign = call.campaigns as Record<string, unknown> | null;
   const publisher = call.publishers as Record<string, unknown> | null;
+  const importBatch = call.import_batches as Record<string, unknown> | null;
   const transcript = (transcriptResult.data ?? null) as Record<string, unknown> | null;
   const analysis = (analysisResult.data ?? null) as Record<string, unknown> | null;
+  const latestReview = ((reviewsResult.data ?? []) as Array<Record<string, unknown>>)[0] ?? null;
+  const latestReviewedBy = latestReview ? asString(latestReview.reviewed_by) : "";
+  const latestReviewerProfileResult = latestReviewedBy
+    ? await client
+        .from("profiles")
+        .select("id, first_name, last_name, email")
+        .eq("id", latestReviewedBy)
+        .maybeSingle()
+    : null;
+
+  assertNoError(latestReviewerProfileResult?.error ?? null, "Unable to load latest reviewer.");
 
   const history: CallHistoryItem[] = [];
 
@@ -895,6 +1436,28 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
     return 0;
   });
 
+  const topFlag = ((flagsResult.data ?? []) as Array<Record<string, unknown>>)
+    .slice()
+    .sort((left, right) => {
+      const leftStatus = asString(left.status) === "open" ? 1 : 0;
+      const rightStatus = asString(right.status) === "open" ? 1 : 0;
+      if (leftStatus !== rightStatus) {
+        return rightStatus - leftStatus;
+      }
+      const leftSeverity = getSeverityRank(asString(left.severity));
+      const rightSeverity = getSeverityRank(asString(right.severity));
+      if (leftSeverity !== rightSeverity) {
+        return rightSeverity - leftSeverity;
+      }
+      return asString(right.created_at).localeCompare(asString(left.created_at));
+    })[0];
+
+  const severitySummary = topFlag
+    ? `${asString(topFlag.severity)} severity`
+    : asNumber(call.flag_count) > 0
+      ? `${asNumber(call.flag_count)} open flags`
+      : null;
+
   return {
     id: asString(call.id),
     callerNumber: asString(call.caller_number),
@@ -907,23 +1470,107 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
     currentDisposition: asNullableString(call.current_disposition),
     currentReviewStatus: (asString(call.current_review_status) || "unreviewed") as ReviewStatus,
     flagCount: asNumber(call.flag_count),
+    topFlag: topFlag ? asString(topFlag.title) : null,
+    severitySummary,
     sourceProvider: (asString(call.source_provider) || "custom") as IntegrationProvider,
     importBatchId: asNullableString(call.import_batch_id),
+    importBatchFilename: asNullableString(importBatch?.filename),
     sourceStatus: asString(call.source_status) || "received",
     transcriptText: asNullableString(transcript?.transcript_text),
     transcriptSegments: parseSegments(transcript?.transcript_segments),
     analysisSummary: asNullableString(analysis?.summary),
     suggestedDisposition: asNullableString(analysis?.disposition_suggested),
     analysisConfidence: analysis ? asNumber(analysis.confidence) : null,
+    analysisModelName: asNullableString(analysis?.model_name),
+    analysisVersion: asNullableString(analysis?.analysis_version),
+    analysisStructuredOutput: analysis?.structured_output ? (analysis.structured_output as Json) : null,
+    latestReviewNotes: latestReview ? asNullableString(latestReview.review_notes) : null,
+    latestReviewedByName: getDisplayName((latestReviewerProfileResult?.data ?? null) as Record<string, unknown> | null),
     flags: ((flagsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
       id: asString(row.id),
       title: asString(row.title),
       severity: (asString(row.severity) || "low") as CallFlagItem["severity"],
       status: (asString(row.status) || "open") as CallFlagItem["status"],
+      category: asString(row.flag_category),
       description: asNullableString(row.description),
+      evidenceSummary: buildEvidenceSummary(row.evidence),
     })),
     history,
   };
+}
+
+export async function getCallSavedViews(
+  client: SupabaseAny,
+  organizationId: string,
+  userId: string
+): Promise<SavedViewSummary[]> {
+  const { data, error } = await client
+    .from("saved_views")
+    .select("id, name, is_default, config")
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId)
+    .eq("entity_type", "calls")
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: true });
+
+  assertNoError(error, "Unable to load saved views.");
+
+  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: asString(row.id),
+    name: asString(row.name),
+    isDefault: asBoolean(row.is_default),
+    config: getSavedViewConfig(row.config),
+  }));
+}
+
+export async function createCallSavedView(
+  client: SupabaseAny,
+  input: {
+    organizationId: string;
+    userId: string;
+    name: string;
+    config: CallSavedViewConfig;
+  }
+): Promise<SavedViewSummary> {
+  const { data, error } = await client
+    .from("saved_views")
+    .insert({
+      organization_id: input.organizationId,
+      user_id: input.userId,
+      entity_type: "calls",
+      name: input.name.trim(),
+      config: {
+        filters: normalizeCallFilters(input.config.filters) as Json,
+        density: input.config.density ?? "comfortable",
+        visibleColumns: input.config.visibleColumns ?? [],
+      } as Json,
+    })
+    .select("id, name, is_default, config")
+    .single();
+
+  assertNoError(error, "Unable to save call view.");
+
+  return {
+    id: asString((data as Record<string, unknown>).id),
+    name: asString((data as Record<string, unknown>).name),
+    isDefault: asBoolean((data as Record<string, unknown>).is_default),
+    config: getSavedViewConfig((data as Record<string, unknown>).config),
+  };
+}
+
+export async function deleteCallSavedView(
+  client: SupabaseAny,
+  organizationId: string,
+  savedViewId: string
+) {
+  const { error } = await client
+    .from("saved_views")
+    .delete()
+    .eq("organization_id", organizationId)
+    .eq("id", savedViewId)
+    .eq("entity_type", "calls");
+
+  assertNoError(error, "Unable to delete saved view.");
 }
 
 export async function getOverviewData(client: SupabaseAny, organizationId: string): Promise<OverviewData> {
@@ -1147,16 +1794,20 @@ export async function getBillingSummary(client: SupabaseAny, organizationId: str
   };
 }
 
-export async function getIntegrationsSummary(client: SupabaseAny, organizationId: string): Promise<IntegrationsSummary> {
+export async function getIntegrationsSummary(
+  client: SupabaseAny,
+  organizationId: string,
+  defaults?: IntegrationWebhookDefaults
+): Promise<IntegrationsSummary> {
   const [integrationsResult, eventsResult] = await Promise.all([
     client
       .from("integrations")
-      .select("id, display_name, provider, status, mode, last_success_at, last_error_at")
+      .select("id, display_name, provider, status, mode, last_success_at, last_error_at, config")
       .eq("organization_id", organizationId)
       .order("display_name"),
     client
       .from("integration_events")
-      .select("id, integration_id, message, created_at")
+      .select("id, integration_id, event_type, severity, message, created_at")
       .eq("organization_id", organizationId)
       .order("created_at", { ascending: false })
       .limit(100),
@@ -1165,11 +1816,31 @@ export async function getIntegrationsSummary(client: SupabaseAny, organizationId
   assertNoError(integrationsResult.error, "Unable to load integrations.");
   assertNoError(eventsResult.error, "Unable to load integration events.");
 
-  const latestByIntegration = new Map<string, string>();
+  const latestByIntegration = new Map<string, { message: string; severity: string | null }>();
+  const recentEventsByIntegration = new Map<string, PublicIntegrationEvent[]>();
   for (const row of (eventsResult.data ?? []) as Array<Record<string, unknown>>) {
     const integrationId = asString(row.integration_id);
-    if (integrationId && !latestByIntegration.has(integrationId)) {
-      latestByIntegration.set(integrationId, asString(row.message));
+    if (!integrationId) {
+      continue;
+    }
+
+    if (!latestByIntegration.has(integrationId)) {
+      latestByIntegration.set(integrationId, {
+        message: asString(row.message),
+        severity: asNullableString(row.severity),
+      });
+    }
+
+    const currentEvents = recentEventsByIntegration.get(integrationId) ?? [];
+    if (currentEvents.length < 3) {
+      currentEvents.push({
+        id: asString(row.id),
+        eventType: asString(row.event_type),
+        severity: asString(row.severity) || "info",
+        message: asString(row.message),
+        createdAt: asString(row.created_at),
+      });
+      recentEventsByIntegration.set(integrationId, currentEvents);
     }
   }
 
@@ -1182,7 +1853,10 @@ export async function getIntegrationsSummary(client: SupabaseAny, organizationId
       mode: asString(row.mode),
       lastSuccessAt: asNullableString(row.last_success_at),
       lastErrorAt: asNullableString(row.last_error_at),
-      lastEventMessage: latestByIntegration.get(asString(row.id)) ?? null,
+      lastEventMessage: latestByIntegration.get(asString(row.id))?.message ?? null,
+      lastEventSeverity: latestByIntegration.get(asString(row.id))?.severity ?? null,
+      webhookAuth: getPublicIntegrationWebhookAuth(row.config, defaults),
+      recentEvents: recentEventsByIntegration.get(asString(row.id)) ?? [],
     })),
   };
 }

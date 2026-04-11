@@ -6,9 +6,18 @@ import { getIntegrationsSummary } from '../../lib/app-data';
 import { requireAppSession } from '../../lib/auth/require-app-session';
 
 const session = await requireAppSession(Astro);
-const initialData = await getIntegrationsSummary(Astro.locals.supabase, session.organization.id);
+const initialData = await getIntegrationsSummary(Astro.locals.supabase, session.organization.id, {
+  fallbackSecretConfigured: Boolean(import.meta.env.INTEGRATION_INGEST_SHARED_SECRET),
+  fallbackHeaderName: import.meta.env.INTEGRATION_INGEST_SIGNATURE_HEADER,
+  fallbackPrefix: import.meta.env.INTEGRATION_INGEST_SIGNATURE_PREFIX,
+});
 ---
 
 <AppLayout title="Integrations" session={session}>
-  <IntegrationsPage client:load organizationId={session.organization.id} initialData={initialData} />
+  <IntegrationsPage
+    client:load
+    organizationId={session.organization.id}
+    currentUserRole={session.organization.role}
+    initialData={initialData}
+  />
 </AppLayout>

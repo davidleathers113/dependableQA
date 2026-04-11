@@ -1,13 +1,13 @@
 # DependableQA Project Status Report
 
-**Date:** April 10, 2026  
+**Date:** April 10, 2026
 **Architecture:** Astro SSR + React islands + Supabase + Tailwind v4 + Netlify functions
 
 ## Verified Snapshot
 
 - Git working tree is **not clean**; there is substantial in-progress product work beyond the last commit.
 - Latest baseline commit: `408e284` - `refactor: standardize Supabase environment variables and enhance configuration handling`
-- Test status: `npm test` passes (`8` files, `27` tests)
+- Test status: `npm test` passes (`10` files, `34` tests)
 - Build status: `npm run build` passes (`astro check && astro build`)
 - Live Supabase project `gqvwuranduktvoqpuywq` is bootstrapped and matches `SUPABASE_URL` in `.env`
 - `supabase/types.ts` now reflects the live schema rather than a generic placeholder
@@ -44,6 +44,7 @@
 - Overview, calls, imports, billing, integrations, reports, updates, AI, and settings surfaces are wired to real server/client data flows.
 - Calls filtering is synchronized to URL search params.
 - Profile, organization, team, alerts, and API settings surfaces are wired to persistence or server-side actions.
+- Integrations now load browser-safe webhook auth metadata and recent diagnostics through a secured server-backed summary flow instead of relying on browser-readable config.
 - Product updates are now sourced from content entries instead of static placeholder UI.
 - The AI surface is wired through an org-scoped `/api/ai/query` flow backed by existing app data.
 
@@ -51,6 +52,7 @@
 - Imports upload to Supabase storage, create import batches, and dispatch processing through `/api/imports/dispatch`.
 - `src/server/import-dispatch.ts` parses CSV input, normalizes rows, creates calls/transcripts/source snapshots, records row-level errors, validates import storage paths, and marks fatal dispatch failures explicitly.
 - Netlify integration ingest now requires a real integration lookup via `x-integration-id`, validates webhook auth before parsing payloads, rejects provider mismatches or malformed payloads, and writes clearer success/failure events.
+- Integration webhook auth settings can now be updated through the product and are normalized into a canonical `integrations.config.webhookAuth` shape while preserving server-side backward-compatible reads.
 - Call review actions are wired through `/api/calls/[callId]/review` for review-status changes, overrides, and flag handling.
 
 ### 7. Billing And Stripe Integration
@@ -60,9 +62,16 @@
 
 ### 8. Automated Verification And Type Safety
 - `package.json` now includes `test` and `test:watch` scripts using Vitest.
-- Focused automated coverage exists for Supabase config, middleware, CSV parsing, import dispatch, call review behavior, and provider ingest rejection/success paths.
+- Focused automated coverage exists for Supabase config, middleware, CSV parsing, import dispatch, provider integration settings, call review behavior, and provider ingest rejection/success paths.
 - `supabase/types.ts` was regenerated from the live project and the app was updated to satisfy real schema-level types.
 - `.env-example` now documents the shared provider ingest auth settings needed for webhook verification.
+- Integration config helpers now verify browser-safe auth metadata derivation and canonical config normalization without exposing secrets.
+
+### 9. Integration Configuration And Diagnostics
+- `src/pages/api/settings/integrations.ts` now provides authenticated integration summary reads plus owner/admin-only webhook auth updates with validation and audit logging.
+- `src/lib/integration-config.ts` centralizes safe integration auth metadata derivation and canonical config normalization so product writes and webhook reads stay aligned.
+- `src/features/integrations/IntegrationsPage.tsx` is no longer read-only: it now exposes webhook auth settings, role-gated save flows, status/error visibility, and recent integration event diagnostics.
+- The integrations page continues to use Astro SSR for initial data, but client refreshes now go through a secured API route so secrets never need to be exposed to browser Supabase reads.
 
 ---
 
@@ -70,30 +79,30 @@
 
 - The AI assistant is implemented as a narrow org-scoped Q&A endpoint, not a full conversational or agentic product.
 - Reports are now data-backed, but advanced reporting features like saved reports/export workflows are still limited or disabled.
-- Integrations display and ingest data, and the generic webhook surface is now hardened, but provider-specific setup/configuration flows and deeper operational tooling are still incomplete.
+- Integrations now support in-product webhook auth configuration and basic diagnostics, but deeper provider-specific onboarding flows, test-webhook tooling, and richer operational analytics are still incomplete.
 - The app has focused automated tests, but not yet full end-to-end browser coverage for core user journeys.
 
 ---
 
 ## Immediate Priorities
 
-### 1. Finish Provider Integration Productization
-- Add provider-specific setup/configuration flows so teams can manage integration secrets, signature headers, and provider metadata without direct database edits.
-- Expose better operator-facing integration diagnostics for recent rejects, degraded states, and remediation steps.
+### 1. Deepen Integration Operations
+- Add provider-specific onboarding flows, guided configuration, and test-webhook tooling so operators can validate settings without manual payload delivery.
+- Expand diagnostics beyond the current summary feed with richer event history, filtering, and explicit remediation guidance for degraded/error integrations.
 
 ### 2. Expand High-Value Product Depth
 - Deepen reporting, exports, and analytics beyond the current summary-level implementation.
 - Evolve the AI assistant from a narrow org-data answer flow into a more capable product surface if that remains a goal.
 
 ### 3. Increase Verification Depth
-- Add end-to-end coverage for auth, onboarding, import dispatch, call review, and critical settings mutations.
+- Add end-to-end coverage for auth, onboarding, integrations settings, import dispatch, call review, and critical settings mutations.
 - Add a dedicated typecheck/lint workflow if stricter CI separation is desired.
 
 ---
 
 ## Recommended Next Step
 
-Focus next on **provider-specific integration configuration and diagnostics**, because the external-input surface is now materially hardened, but teams still need a first-class way to manage webhook auth settings and understand why an integration is healthy, degraded, or rejecting payloads.
+Focus next on **integration operations and end-to-end verification**, because teams can now manage webhook auth and inspect basic diagnostics in-product, but they still need stronger operator tooling and browser-level coverage for the full configure-to-ingest workflow.
 
 ---
 
@@ -109,12 +118,13 @@ The working tree currently contains substantial in-progress changes beyond the l
 ### 2. Data And Backend Work
 - `src/lib/app-data.ts` has major ongoing changes.
 - Supabase request/session helpers, middleware, import dispatch, and Netlify ingest code are modified.
-- New API routes exist for AI and settings API-key management.
+- New API routes exist for AI, settings API-key management, and integration settings/diagnostics management.
 - New shared request/auth helpers exist for Netlify webhook handling, and focused ingest hardening tests were added.
+- New integration config helpers exist to normalize persisted webhook auth settings and derive browser-safe diagnostics metadata.
 
 ### 3. Tests, Types, And Tooling
 - `package.json`, `package-lock.json`, and `vitest.config.ts` reflect active testing/tooling work.
-- Focused tests have been added for auth recovery, Supabase config, middleware, CSV parsing, import dispatch, provider ingest, and call review.
+- Focused tests have been added for auth recovery, Supabase config, middleware, CSV parsing, import dispatch, provider integration settings, provider ingest, and call review.
 - `supabase/types.ts` has been regenerated from the live schema and is currently modified.
 
 ### 4. Content And Content Configuration
