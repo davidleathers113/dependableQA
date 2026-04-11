@@ -467,6 +467,46 @@ function normalizeFilename(fileName: string) {
     .split("#").join("-");
 }
 
+function hasValidStorageSegment(value: string) {
+  const segment = value.trim();
+  if (!segment || segment === "." || segment === "..") {
+    return false;
+  }
+
+  return !segment.includes("/");
+}
+
+export function isValidImportStoragePath(organizationId: string, storagePath: string) {
+  const normalizedOrganizationId = organizationId.trim();
+  const normalizedPath = storagePath.trim();
+
+  if (!hasValidStorageSegment(normalizedOrganizationId)) {
+    return false;
+  }
+
+  if (!normalizedPath.startsWith(`${normalizedOrganizationId}/`)) {
+    return false;
+  }
+
+  const segments = normalizedPath.split("/").filter((segment) => segment.length > 0);
+  if (segments.length < 2) {
+    return false;
+  }
+
+  for (const segment of segments) {
+    if (!hasValidStorageSegment(segment)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function buildImportStoragePath(organizationId: string, fileName: string, now = Date.now()) {
+  const safeName = `${now}-${normalizeFilename(fileName)}`;
+  return `${organizationId.trim()}/${safeName}`;
+}
+
 function parseSegments(value: unknown): Array<{ speaker: string; text: string; start?: number; end?: number }> {
   if (!Array.isArray(value)) {
     return [];
@@ -1829,6 +1869,10 @@ export async function createImportBatchRecord(
     sourceProvider: IntegrationProvider;
   }
 ) {
+  if (!isValidImportStoragePath(options.organizationId, options.storagePath)) {
+    throw new Error("Import storage path must stay within the organization imports prefix.");
+  }
+
   const { data, error } = await client
     .from("import_batches")
     .insert({

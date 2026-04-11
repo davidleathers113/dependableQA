@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { getAdminSupabase } from "../../src/lib/supabase/admin-client";
 import { insertAuditLog } from "../../src/lib/app-data";
+import { getHeaderValue, parseNetlifyRequestBody } from "../../src/server/netlify-request";
 
 function json(statusCode: number, body: Record<string, unknown>) {
   return {
@@ -10,18 +11,6 @@ function json(statusCode: number, body: Record<string, unknown>) {
     },
     body: JSON.stringify(body),
   };
-}
-
-function parseBody(body: string | null | undefined, isBase64Encoded?: boolean) {
-  if (!body) {
-    return "";
-  }
-
-  if (isBase64Encoded) {
-    return Buffer.from(body, "base64").toString("utf8");
-  }
-
-  return body;
 }
 
 function metadataValue(metadata: Record<string, string> | null | undefined, key: string) {
@@ -45,14 +34,18 @@ export async function handler(event: {
   }
 
   const stripe = new Stripe(secretKey);
-  const signature = event.headers?.["stripe-signature"] || event.headers?.["Stripe-Signature"];
+  const signature = getHeaderValue(event.headers, "stripe-signature");
   if (!signature) {
     return json(400, { error: "Missing Stripe signature." });
   }
 
   let stripeEvent: Stripe.Event;
   try {
-    stripeEvent = stripe.webhooks.constructEvent(parseBody(event.body, event.isBase64Encoded), signature, webhookSecret);
+    stripeEvent = stripe.webhooks.constructEvent(
+      parseNetlifyRequestBody(event.body, event.isBase64Encoded),
+      signature,
+      webhookSecret
+    );
   } catch (error) {
     return json(400, { error: error instanceof Error ? error.message : "Invalid Stripe payload." });
   }

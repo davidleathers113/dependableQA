@@ -59,6 +59,23 @@ describe("POST /api/imports/dispatch", () => {
     expect(response.status).toBe(400);
   });
 
+  it("returns 400 when the request body is invalid JSON", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1" },
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/imports/dispatch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{",
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+  });
+
   it("dispatches the batch for the authenticated organization", async () => {
     const adminClient = { name: "admin" };
     requireApiSession.mockResolvedValue({

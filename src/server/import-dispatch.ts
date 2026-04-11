@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, TablesInsert } from "../../supabase/types";
-import { insertAuditLog, slugify } from "../lib/app-data";
+import { insertAuditLog, isValidImportStoragePath, slugify } from "../lib/app-data";
 import { getImportBatchFinalStatus, parseCsv, type CsvRow } from "./import-csv";
 
 type SupabaseAny = SupabaseClient<Database>;
@@ -101,6 +101,38 @@ async function insertRowError(
   }
 }
 
+async function markImportBatchFailed(
+  client: SupabaseAny,
+  options: { organizationId: string; batchId: string; actorUserId: string | null },
+  filename: string,
+  message: string
+) {
+  const updateResult = await client
+    .from("import_batches")
+    .update({
+      status: "failed",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("id", options.batchId)
+    .eq("organization_id", options.organizationId);
+
+  if (updateResult.error) {
+    throw new Error(updateResult.error.message);
+  }
+
+  await insertAuditLog(client, {
+    organizationId: options.organizationId,
+    actorUserId: options.actorUserId,
+    entityType: "import_batch",
+    entityId: options.batchId,
+    action: "import.dispatch.failed",
+    metadata: {
+      summary: message,
+      filename,
+    },
+  });
+}
+
 export async function dispatchImportBatch(
   client: SupabaseAny,
   options: { organizationId: string; batchId: string; actorUserId: string | null }
@@ -118,183 +150,205 @@ export async function dispatchImportBatch(
 
   const batch = batchResult.data;
 
-  await client
-    .from("import_batches")
-    .update({
-      status: "processing",
-      started_at: new Date().toISOString(),
-    })
-    .eq("id", options.batchId)
-    .eq("organization_id", options.organizationId);
+  try {
+    const startResult = await client
+      .from("import_batches")
+      .update({
+        status: "processing",
+        started_at: new Date().toISOString(),
+      })
+      .eq("id", options.batchId)
+      .eq("organization_id", options.organizationId);
 
-  const download = await client.storage.from("imports").download(asString(batch.storage_path));
-  if (download.error || !download.data) {
-    throw new Error(download.error?.message ?? "Unable to read import file.");
-  }
-
-  const csvText = await download.data.text();
-  const rows = parseCsv(csvText);
-  let acceptedCount = 0;
-  let rejectedCount = 0;
-
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const row = rows[rowIndex];
-    const rowNumber = rowIndex + 2;
-    const callerNumber = firstValue(row, ["caller_number", "caller", "phone", "phone_number"]);
-    const destinationNumber = firstValue(row, ["destination_number", "target_number"]);
-    const startedAt = toIsoDate(firstValue(row, ["started_at", "call_started_at", "timestamp", "created_at"]));
-    const endedAt = toIsoDate(firstValue(row, ["ended_at", "call_ended_at"]));
-    const durationSeconds = toInteger(firstValue(row, ["duration_seconds", "duration", "call_length_seconds"]));
-    const externalCallId = firstValue(row, ["external_call_id", "call_id", "source_call_id"]);
-    const campaignName = firstValue(row, ["campaign_name", "campaign"]);
-    const publisherName = firstValue(row, ["publisher_name", "publisher"]);
-    const transcriptText = firstValue(row, ["transcript_text", "transcript"]);
-    const disposition = firstValue(row, ["current_disposition", "disposition"]);
-
-    if (!callerNumber || !startedAt) {
-      rejectedCount += 1;
-      await insertRowError(
-        client,
-        options.organizationId,
-        options.batchId,
-        rowNumber,
-        "INVALID_ROW",
-        "Rows must include at least caller_number and started_at.",
-        row
-      );
-      continue;
+    if (startResult.error) {
+      throw new Error(startResult.error.message);
     }
 
-    try {
-      const publisherId = await ensureNamedEntity(client, "publishers", options.organizationId, publisherName);
-      const campaignId = await ensureNamedEntity(client, "campaigns", options.organizationId, campaignName);
-      const dedupeHash = `${asString(batch.source_provider)}:${externalCallId || callerNumber}:${startedAt}`;
+    const storagePath = asString(batch.storage_path);
+    if (!isValidImportStoragePath(options.organizationId, storagePath)) {
+      throw new Error("Import storage path is invalid for this organization.");
+    }
 
-      const callPayload: TablesInsert<"calls"> = {
-        organization_id: options.organizationId,
-        import_batch_id: options.batchId,
-        publisher_id: publisherId,
-        campaign_id: campaignId,
-        external_call_id: externalCallId || null,
-        dedupe_hash: dedupeHash,
-        caller_number: callerNumber,
-        destination_number: destinationNumber || null,
-        started_at: startedAt,
-        ended_at: endedAt || null,
-        duration_seconds: durationSeconds,
-        source_provider: batch.source_provider,
-        current_disposition: disposition || null,
-        current_review_status: "unreviewed",
-        source_status: "received",
-      };
+    const download = await client.storage.from("imports").download(storagePath);
+    if (download.error || !download.data) {
+      throw new Error(download.error?.message ?? "Unable to read import file.");
+    }
 
-      const callInsert = await client
-        .from("calls")
-        .insert(callPayload)
-        .select("id")
-        .single();
+    const csvText = await download.data.text();
+    const rows = parseCsv(csvText);
+    let acceptedCount = 0;
+    let rejectedCount = 0;
 
-      if (callInsert.error || !callInsert.data) {
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      const rowNumber = rowIndex + 2;
+      const callerNumber = firstValue(row, ["caller_number", "caller", "phone", "phone_number"]);
+      const destinationNumber = firstValue(row, ["destination_number", "target_number"]);
+      const startedAt = toIsoDate(firstValue(row, ["started_at", "call_started_at", "timestamp", "created_at"]));
+      const endedAt = toIsoDate(firstValue(row, ["ended_at", "call_ended_at"]));
+      const durationSeconds = toInteger(firstValue(row, ["duration_seconds", "duration", "call_length_seconds"]));
+      const externalCallId = firstValue(row, ["external_call_id", "call_id", "source_call_id"]);
+      const campaignName = firstValue(row, ["campaign_name", "campaign"]);
+      const publisherName = firstValue(row, ["publisher_name", "publisher"]);
+      const transcriptText = firstValue(row, ["transcript_text", "transcript"]);
+      const disposition = firstValue(row, ["current_disposition", "disposition"]);
+
+      if (!callerNumber || !startedAt) {
         rejectedCount += 1;
         await insertRowError(
           client,
           options.organizationId,
           options.batchId,
           rowNumber,
-          "CALL_INSERT_FAILED",
-          callInsert.error?.message ?? "Unable to create call record.",
+          "INVALID_ROW",
+          "Rows must include at least caller_number and started_at.",
           row
         );
         continue;
       }
 
-      const callId = asString((callInsert.data as Record<string, unknown>).id);
+      try {
+        const publisherId = await ensureNamedEntity(client, "publishers", options.organizationId, publisherName);
+        const campaignId = await ensureNamedEntity(client, "campaigns", options.organizationId, campaignName);
+        const dedupeHash = `${asString(batch.source_provider)}:${externalCallId || callerNumber}:${startedAt}`;
 
-      const snapshotPayload: TablesInsert<"call_source_snapshots"> = {
-        organization_id: options.organizationId,
-        call_id: callId,
-        source_provider: batch.source_provider,
-        source_kind: "csv",
-        raw_payload: row,
-        normalized_payload: {
+        const callPayload: TablesInsert<"calls"> = {
+          organization_id: options.organizationId,
+          import_batch_id: options.batchId,
+          publisher_id: publisherId,
+          campaign_id: campaignId,
+          external_call_id: externalCallId || null,
+          dedupe_hash: dedupeHash,
           caller_number: callerNumber,
           destination_number: destinationNumber || null,
           started_at: startedAt,
           ended_at: endedAt || null,
           duration_seconds: durationSeconds,
-          external_call_id: externalCallId || null,
-          campaign_name: campaignName || null,
-          publisher_name: publisherName || null,
-          disposition: disposition || null,
-        },
-      };
+          source_provider: batch.source_provider,
+          current_disposition: disposition || null,
+          current_review_status: "unreviewed",
+          source_status: "received",
+        };
 
-      await client.from("call_source_snapshots").insert(snapshotPayload);
+        const callInsert = await client
+          .from("calls")
+          .insert(callPayload)
+          .select("id")
+          .single();
 
-      if (transcriptText) {
-        await client.from("call_transcripts").insert({
+        if (callInsert.error || !callInsert.data) {
+          rejectedCount += 1;
+          await insertRowError(
+            client,
+            options.organizationId,
+            options.batchId,
+            rowNumber,
+            "CALL_INSERT_FAILED",
+            callInsert.error?.message ?? "Unable to create call record.",
+            row
+          );
+          continue;
+        }
+
+        const callId = asString((callInsert.data as Record<string, unknown>).id);
+
+        const snapshotPayload: TablesInsert<"call_source_snapshots"> = {
           organization_id: options.organizationId,
           call_id: callId,
-          transcript_text: transcriptText,
-          transcript_segments: [],
-        });
+          source_provider: batch.source_provider,
+          source_kind: "csv",
+          raw_payload: row,
+          normalized_payload: {
+            caller_number: callerNumber,
+            destination_number: destinationNumber || null,
+            started_at: startedAt,
+            ended_at: endedAt || null,
+            duration_seconds: durationSeconds,
+            external_call_id: externalCallId || null,
+            campaign_name: campaignName || null,
+            publisher_name: publisherName || null,
+            disposition: disposition || null,
+          },
+        };
+
+        const snapshotInsert = await client.from("call_source_snapshots").insert(snapshotPayload);
+        if (snapshotInsert.error) {
+          throw new Error(snapshotInsert.error.message);
+        }
+
+        if (transcriptText) {
+          const transcriptInsert = await client.from("call_transcripts").insert({
+            organization_id: options.organizationId,
+            call_id: callId,
+            transcript_text: transcriptText,
+            transcript_segments: [],
+          });
+
+          if (transcriptInsert.error) {
+            throw new Error(transcriptInsert.error.message);
+          }
+        }
+
+        acceptedCount += 1;
+      } catch (error) {
+        rejectedCount += 1;
+        await insertRowError(
+          client,
+          options.organizationId,
+          options.batchId,
+          rowNumber,
+          "IMPORT_EXCEPTION",
+          error instanceof Error ? error.message : "Unexpected import error.",
+          row
+        );
       }
-
-      acceptedCount += 1;
-    } catch (error) {
-      rejectedCount += 1;
-      await insertRowError(
-        client,
-        options.organizationId,
-        options.batchId,
-        rowNumber,
-        "IMPORT_EXCEPTION",
-        error instanceof Error ? error.message : "Unexpected import error.",
-        row
-      );
     }
-  }
 
-  const finalStatus = getImportBatchFinalStatus(acceptedCount, rejectedCount);
+    const finalStatus = getImportBatchFinalStatus(acceptedCount, rejectedCount);
 
-  const updateResult = await client
-    .from("import_batches")
-    .update({
-      status: finalStatus,
-      row_count_total: rows.length,
-      row_count_accepted: acceptedCount,
-      row_count_rejected: rejectedCount,
-      completed_at: new Date().toISOString(),
-    })
-    .eq("id", options.batchId)
-    .eq("organization_id", options.organizationId);
+    const updateResult = await client
+      .from("import_batches")
+      .update({
+        status: finalStatus,
+        row_count_total: rows.length,
+        row_count_accepted: acceptedCount,
+        row_count_rejected: rejectedCount,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", options.batchId)
+      .eq("organization_id", options.organizationId);
 
-  if (updateResult.error) {
-    throw new Error(updateResult.error.message);
-  }
+    if (updateResult.error) {
+      throw new Error(updateResult.error.message);
+    }
 
-  await insertAuditLog(client, {
-    organizationId: options.organizationId,
-    actorUserId: options.actorUserId,
-    entityType: "import_batch",
-    entityId: options.batchId,
-    action: "import.dispatch.completed",
-    after: {
+    await insertAuditLog(client, {
+      organizationId: options.organizationId,
+      actorUserId: options.actorUserId,
+      entityType: "import_batch",
+      entityId: options.batchId,
+      action: "import.dispatch.completed",
+      after: {
+        acceptedCount,
+        rejectedCount,
+        rowCountTotal: rows.length,
+        status: finalStatus,
+      },
+      metadata: {
+        summary: `Processed ${acceptedCount} rows and rejected ${rejectedCount}.`,
+        filename: asString(batch.filename),
+      },
+    });
+
+    return {
       acceptedCount,
       rejectedCount,
       rowCountTotal: rows.length,
       status: finalStatus,
-    },
-    metadata: {
-      summary: `Processed ${acceptedCount} rows and rejected ${rejectedCount}.`,
-      filename: asString(batch.filename),
-    },
-  });
-
-  return {
-    acceptedCount,
-    rejectedCount,
-    rowCountTotal: rows.length,
-    status: finalStatus,
-  };
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to dispatch import batch.";
+    await markImportBatchFailed(client, options, asString(batch.filename), message);
+    throw new Error(message);
+  }
 }

@@ -16,10 +16,19 @@ export async function handler(event: { httpMethod?: string; body?: string | null
     return json(405, { error: "Method not allowed" });
   }
 
-  const payload = event.body ? JSON.parse(event.body) : {};
-  const organizationId = typeof payload.organizationId === "string" ? payload.organizationId : "";
-  const batchId = typeof payload.batchId === "string" ? payload.batchId : "";
-  const actorUserId = typeof payload.actorUserId === "string" ? payload.actorUserId : null;
+  let payload: unknown = {};
+  try {
+    payload = event.body ? JSON.parse(event.body) : {};
+  } catch {
+    return json(400, { error: "Request body must be valid JSON." });
+  }
+
+  const body = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>)
+    : {};
+  const organizationId = typeof body.organizationId === "string" ? body.organizationId : "";
+  const batchId = typeof body.batchId === "string" ? body.batchId : "";
+  const actorUserId = typeof body.actorUserId === "string" ? body.actorUserId : null;
 
   if (!organizationId || !batchId) {
     return json(400, { error: "organizationId and batchId are required" });

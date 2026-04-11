@@ -14,7 +14,14 @@ export const POST: APIRoute = async (context) => {
     });
   }
 
-  const body = await context.request.json().catch(() => null);
+  const body = await context.request.json().catch(() => undefined);
+  if (body === undefined) {
+    return new Response(JSON.stringify({ error: "Request body must be valid JSON." }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   const batchId = typeof body?.batchId === "string" ? body.batchId : "";
 
   if (!batchId) {

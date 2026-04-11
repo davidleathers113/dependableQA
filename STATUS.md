@@ -7,7 +7,7 @@
 
 - Git working tree is **not clean**; there is substantial in-progress product work beyond the last commit.
 - Latest baseline commit: `408e284` - `refactor: standardize Supabase environment variables and enhance configuration handling`
-- Test status: `npm test` passes (`6` files, `20` tests)
+- Test status: `npm test` passes (`8` files, `27` tests)
 - Build status: `npm run build` passes (`astro check && astro build`)
 - Live Supabase project `gqvwuranduktvoqpuywq` is bootstrapped and matches `SUPABASE_URL` in `.env`
 - `supabase/types.ts` now reflects the live schema rather than a generic placeholder
@@ -49,18 +49,20 @@
 
 ### 6. Imports, Ingestion, And Review Workflows
 - Imports upload to Supabase storage, create import batches, and dispatch processing through `/api/imports/dispatch`.
-- `src/server/import-dispatch.ts` parses CSV input, normalizes rows, creates calls/transcripts/source snapshots, records row-level errors, and updates batch status.
-- Netlify integration ingest writes calls and related records using the live typed schema.
+- `src/server/import-dispatch.ts` parses CSV input, normalizes rows, creates calls/transcripts/source snapshots, records row-level errors, validates import storage paths, and marks fatal dispatch failures explicitly.
+- Netlify integration ingest now requires a real integration lookup via `x-integration-id`, validates webhook auth before parsing payloads, rejects provider mismatches or malformed payloads, and writes clearer success/failure events.
 - Call review actions are wired through `/api/calls/[callId]/review` for review-status changes, overrides, and flag handling.
 
 ### 7. Billing And Stripe Integration
 - `/api/billing/portal` creates or reuses Stripe billing context and redirects to the Billing Portal.
 - `netlify/functions/stripe-webhook.ts` handles billing-related events and writes billing/audit data.
+- Shared Netlify request helpers now centralize raw-body parsing and case-insensitive header handling so webhook verification logic does not drift between Stripe and provider ingest.
 
 ### 8. Automated Verification And Type Safety
 - `package.json` now includes `test` and `test:watch` scripts using Vitest.
-- Focused automated coverage exists for Supabase config, middleware, CSV parsing, import dispatch, and call review behavior.
+- Focused automated coverage exists for Supabase config, middleware, CSV parsing, import dispatch, call review behavior, and provider ingest rejection/success paths.
 - `supabase/types.ts` was regenerated from the live project and the app was updated to satisfy real schema-level types.
+- `.env-example` now documents the shared provider ingest auth settings needed for webhook verification.
 
 ---
 
@@ -68,16 +70,16 @@
 
 - The AI assistant is implemented as a narrow org-scoped Q&A endpoint, not a full conversational or agentic product.
 - Reports are now data-backed, but advanced reporting features like saved reports/export workflows are still limited or disabled.
-- Integrations display and ingest data, but provider-specific setup flows, stronger webhook authentication, and deeper operational hardening are still incomplete.
+- Integrations display and ingest data, and the generic webhook surface is now hardened, but provider-specific setup/configuration flows and deeper operational tooling are still incomplete.
 - The app has focused automated tests, but not yet full end-to-end browser coverage for core user journeys.
 
 ---
 
 ## Immediate Priorities
 
-### 1. Harden Integration And Ingest Paths
-- Add stronger request validation, provider signature/auth checks, and clearer operational failure handling for ingest endpoints.
-- Verify storage path conventions and webhook assumptions against production-like inputs.
+### 1. Finish Provider Integration Productization
+- Add provider-specific setup/configuration flows so teams can manage integration secrets, signature headers, and provider metadata without direct database edits.
+- Expose better operator-facing integration diagnostics for recent rejects, degraded states, and remediation steps.
 
 ### 2. Expand High-Value Product Depth
 - Deepen reporting, exports, and analytics beyond the current summary-level implementation.
@@ -91,7 +93,7 @@
 
 ## Recommended Next Step
 
-Focus next on **hardening provider ingest and integration workflows**, because the app and live Supabase schema are now aligned, typed, seeded, and building successfully, but external-input paths still carry the most operational and security risk.
+Focus next on **provider-specific integration configuration and diagnostics**, because the external-input surface is now materially hardened, but teams still need a first-class way to manage webhook auth settings and understand why an integration is healthy, degraded, or rejecting payloads.
 
 ---
 
@@ -108,10 +110,11 @@ The working tree currently contains substantial in-progress changes beyond the l
 - `src/lib/app-data.ts` has major ongoing changes.
 - Supabase request/session helpers, middleware, import dispatch, and Netlify ingest code are modified.
 - New API routes exist for AI and settings API-key management.
+- New shared request/auth helpers exist for Netlify webhook handling, and focused ingest hardening tests were added.
 
 ### 3. Tests, Types, And Tooling
 - `package.json`, `package-lock.json`, and `vitest.config.ts` reflect active testing/tooling work.
-- Focused tests have been added for auth recovery, Supabase config, middleware, CSV parsing, import dispatch, and call review.
+- Focused tests have been added for auth recovery, Supabase config, middleware, CSV parsing, import dispatch, provider ingest, and call review.
 - `supabase/types.ts` has been regenerated from the live schema and is currently modified.
 
 ### 4. Content And Content Configuration

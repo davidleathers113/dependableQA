@@ -2,9 +2,9 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import {
+  buildImportStoragePath,
   createImportBatchRecord,
   getImportsPageData,
-  normalizeFilename,
   type ImportsPageData,
   type IntegrationProvider,
 } from "../../lib/app-data";
@@ -39,8 +39,7 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
       const supabase = getBrowserSupabase();
-      const safeName = `${Date.now()}-${normalizeFilename(file.name)}`;
-      const storagePath = `${organizationId}/${safeName}`;
+      const storagePath = buildImportStoragePath(organizationId, file.name);
 
       const upload = await supabase.storage.from("imports").upload(storagePath, file, {
         cacheControl: "3600",

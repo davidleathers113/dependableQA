@@ -1,6 +1,13 @@
 import { getAdminSupabase } from "../../src/lib/supabase/admin-client";
-import { insertAuditLog, slugify } from "../../src/lib/app-data";
-import type { Database, Json, TablesInsert } from "../../supabase/types";
+import {
+  getWebhookAuthConfig,
+  ingestIntegrationCalls,
+  loadIntegrationContext,
+  parseWebhookPayload,
+  recordIntegrationFailure,
+  verifyWebhookRequest,
+} from "../../src/server/integration-ingest";
+import { getHeaderValue, parseNetlifyRequestBody } from "../../src/server/netlify-request";
 
 function json(statusCode: number, body: Record<string, unknown>) {
   return {
@@ -12,214 +19,117 @@ function json(statusCode: number, body: Record<string, unknown>) {
   };
 }
 
-function asString(value: unknown) {
-  return typeof value === "string" ? value : "";
-}
-
-function toIntegrationProvider(value: unknown): Database["public"]["Enums"]["integration_provider"] {
-  const normalized = asString(value);
-  if (normalized === "ringba" || normalized === "retreaver" || normalized === "trackdrive" || normalized === "custom") {
-    return normalized;
-  }
-
-  return "custom";
-}
-
-function toIsoDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return new Date().toISOString();
-  }
-
-  return date.toISOString();
-}
-
-async function ensureNamedEntity(
-  client: ReturnType<typeof getAdminSupabase>,
-  table: "publishers" | "campaigns",
-  organizationId: string,
-  name: string
-) {
-  if (!name.trim()) {
-    return null;
-  }
-
-  const normalizedName = slugify(name);
-  const existing = await client
-    .from(table)
-    .select("id")
-    .eq("organization_id", organizationId)
-    .eq("normalized_name", normalizedName)
-    .maybeSingle();
-
-  if (existing.data) {
-    return String((existing.data as Record<string, unknown>).id ?? "");
-  }
-
-  const created = await client
-    .from(table)
-    .insert({
-      organization_id: organizationId,
-      name,
-      normalized_name: normalizedName,
-      external_refs: {},
-    })
-    .select("id")
-    .single();
-
-  if (created.error) {
-    throw new Error(created.error.message);
-  }
-
-  return String((created.data as Record<string, unknown>).id ?? "");
-}
-
 export async function handler(event: {
   httpMethod?: string;
   body?: string | null;
+  isBase64Encoded?: boolean;
   headers?: Record<string, string | undefined>;
 }) {
   if (event.httpMethod !== "POST") {
     return json(405, { error: "Method not allowed" });
   }
 
-  const payload = event.body ? JSON.parse(event.body) : {};
-  const organizationId = asString(payload.organizationId || event.headers?.["x-organization-id"]);
-  const integrationId = asString(payload.integrationId || event.headers?.["x-integration-id"]);
-  const provider = toIntegrationProvider(payload.provider || event.headers?.["x-provider"]);
-  const calls = Array.isArray(payload.calls) ? payload.calls : [];
-  const message = asString(payload.message) || `Received ${provider} webhook`;
-
-  if (!organizationId || !integrationId) {
-    return json(400, { error: "organizationId and integrationId are required" });
+  const integrationId = getHeaderValue(event.headers, "x-integration-id");
+  if (!integrationId) {
+    return json(400, { error: "Missing x-integration-id header." });
   }
 
+  const rawBody = parseNetlifyRequestBody(event.body, event.isBase64Encoded);
   const admin = getAdminSupabase();
-
-  const eventInsert = await admin
-    .from("integration_events")
-    .insert({
-      organization_id: organizationId,
-      integration_id: integrationId,
-      event_type: asString(payload.eventType) || "webhook.received",
-      severity: asString(payload.severity) || "info",
-      message,
-      payload,
-    })
-    .select("id")
-    .single();
-
-  if (eventInsert.error) {
-    return json(500, { error: eventInsert.error.message });
+  const integration = await loadIntegrationContext(admin, integrationId);
+  if (!integration) {
+    return json(404, { error: "Integration not found." });
   }
 
-  let ingestedCount = 0;
-
-  for (const callPayload of calls as Array<Record<string, unknown>>) {
-    const callerNumber = asString(callPayload.callerNumber || callPayload.caller_number);
-    if (!callerNumber) {
-      continue;
-    }
-
-    const campaignId = await ensureNamedEntity(
-      admin,
-      "campaigns",
-      organizationId,
-      asString(callPayload.campaignName || callPayload.campaign_name)
-    );
-    const publisherId = await ensureNamedEntity(
-      admin,
-      "publishers",
-      organizationId,
-      asString(callPayload.publisherName || callPayload.publisher_name)
-    );
-    const externalCallId = asString(callPayload.externalCallId || callPayload.external_call_id);
-    const startedAt = toIsoDate(asString(callPayload.startedAt || callPayload.started_at || new Date().toISOString()));
-    const dedupeHash = `${provider}:${externalCallId || callerNumber}:${startedAt}`;
-
-    const callValues: TablesInsert<"calls"> = {
-      organization_id: organizationId,
-      integration_id: integrationId,
-      publisher_id: publisherId,
-      campaign_id: campaignId,
-      external_call_id: externalCallId || null,
-      dedupe_hash: dedupeHash,
-      caller_number: callerNumber,
-      destination_number: asString(callPayload.destinationNumber || callPayload.destination_number) || null,
-      started_at: startedAt,
-      ended_at: asString(callPayload.endedAt || callPayload.ended_at) || null,
-      duration_seconds: Number(callPayload.durationSeconds || callPayload.duration_seconds || 0),
-      source_provider: provider,
-      current_disposition: asString(callPayload.currentDisposition || callPayload.current_disposition) || null,
-      source_status: "received",
-    };
-
-    const callInsert = await admin
-      .from("calls")
-      .upsert(callValues, {
-        onConflict: "organization_id,dedupe_hash",
-      })
-      .select("id")
-      .single();
-
-    if (callInsert.error || !callInsert.data) {
-      continue;
-    }
-
-    const callId = String((callInsert.data as Record<string, unknown>).id ?? "");
-
-    const snapshotValues: TablesInsert<"call_source_snapshots"> = {
-      organization_id: organizationId,
-      call_id: callId,
-      source_provider: provider,
-      source_kind: "webhook",
-      raw_payload: callPayload as Json,
-      normalized_payload: callPayload as Json,
-    };
-
-    await admin.from("call_source_snapshots").insert(snapshotValues);
-
-    const transcriptText = asString(callPayload.transcriptText || callPayload.transcript_text);
-    if (transcriptText) {
-      await admin.from("call_transcripts").upsert(
-        {
-          organization_id: organizationId,
-          call_id: callId,
-          transcript_text: transcriptText,
-          transcript_segments: [],
-        },
-        {
-          onConflict: "call_id",
-        }
-      );
-    }
-
-    ingestedCount += 1;
+  const authConfig = getWebhookAuthConfig(integration);
+  if (!authConfig) {
+    await recordIntegrationFailure(admin, integration, {
+      eventType: "webhook.rejected",
+      message: `Rejected ${integration.displayName} webhook because auth is not configured.`,
+      payload: {
+        reason: "auth_not_configured",
+      },
+      errorType: "integration.webhook.rejected",
+    });
+    return json(503, { error: "Webhook authentication is not configured for this integration." });
   }
 
-  await admin
-    .from("integrations")
-    .update({
-      status: "connected",
-      last_success_at: new Date().toISOString(),
-    })
-    .eq("id", integrationId)
-    .eq("organization_id", organizationId);
+  const verificationResult = verifyWebhookRequest(event.headers, rawBody, authConfig);
+  if (!verificationResult.ok) {
+    await recordIntegrationFailure(admin, integration, {
+      eventType: "webhook.rejected",
+      message: `Rejected ${integration.displayName} webhook: ${verificationResult.error}`,
+      payload: {
+        reason: "signature_verification_failed",
+      },
+      errorType: "integration.webhook.rejected",
+    });
+    return json(401, { error: verificationResult.error });
+  }
 
-  await insertAuditLog(admin, {
-    organizationId,
-    actorUserId: null,
-    entityType: "integration",
-    entityId: integrationId,
-    action: "integration.webhook.ingested",
-    metadata: {
-      summary: `Processed ${ingestedCount} calls from ${provider}.`,
-      eventId: String((eventInsert.data as Record<string, unknown>).id ?? ""),
-    },
-  });
+  let parsedPayload: ReturnType<typeof parseWebhookPayload>;
+  try {
+    parsedPayload = parseWebhookPayload(rawBody);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Webhook payload is invalid.";
+    await recordIntegrationFailure(admin, integration, {
+      eventType: "webhook.rejected",
+      message: `Rejected ${integration.displayName} webhook: ${message}`,
+      payload: {
+        reason: "invalid_payload",
+      },
+      errorType: "integration.webhook.rejected",
+    });
+    return json(400, { error: message });
+  }
 
-  return json(200, {
-    ok: true,
-    ingestedCount,
-  });
+  if (parsedPayload.payloadProvider && parsedPayload.payloadProvider !== integration.provider) {
+    const message = "Webhook provider does not match the configured integration.";
+    await recordIntegrationFailure(admin, integration, {
+      eventType: "webhook.rejected",
+      message: `Rejected ${integration.displayName} webhook: ${message}`,
+      payload: {
+        reason: "provider_mismatch",
+        payloadProvider: parsedPayload.payloadProvider,
+        integrationProvider: integration.provider,
+      },
+      errorType: "integration.webhook.rejected",
+    });
+    return json(400, { error: message });
+  }
+
+  if (parsedPayload.calls.length === 0) {
+    const message = "Webhook payload did not contain any call records.";
+    await recordIntegrationFailure(admin, integration, {
+      eventType: "webhook.rejected",
+      message: `Rejected ${integration.displayName} webhook: ${message}`,
+      payload: {
+        reason: "missing_calls",
+      },
+      errorType: "integration.webhook.rejected",
+    });
+    return json(400, { error: message });
+  }
+
+  try {
+    const result = await ingestIntegrationCalls(admin, integration, parsedPayload.payload, parsedPayload.calls);
+    return json(result.statusCode, {
+      ok: result.rejectedCount === 0,
+      ingestedCount: result.ingestedCount,
+      rejectedCount: result.rejectedCount,
+      eventId: result.eventId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to ingest webhook payload.";
+    await recordIntegrationFailure(admin, integration, {
+      eventType: "webhook.failed",
+      message: `Failed to process ${integration.displayName} webhook: ${message}`,
+      payload: {
+        reason: "processing_failure",
+      },
+      status: "error",
+      errorType: "integration.webhook.failed",
+    });
+    return json(500, { error: message });
+  }
 }
