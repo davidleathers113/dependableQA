@@ -6,12 +6,14 @@ const {
   getAdminSupabase,
   getHeaderValue,
   parseNetlifyRequestBody,
+  insertAuditLog,
 } = vi.hoisted(() => ({
   constructEventMock: vi.fn(),
   syncBillingAccountPaymentMethodByCustomerId: vi.fn(),
   getAdminSupabase: vi.fn(),
   getHeaderValue: vi.fn(),
   parseNetlifyRequestBody: vi.fn(),
+  insertAuditLog: vi.fn(),
 }));
 
 vi.mock("stripe", () => ({
@@ -31,7 +33,7 @@ vi.mock("../../src/lib/stripe/payment-method-sync", () => ({
 }));
 
 vi.mock("../../src/lib/app-data", () => ({
-  insertAuditLog: vi.fn(),
+  insertAuditLog,
 }));
 
 vi.mock("../../src/server/netlify-request", () => ({
@@ -48,8 +50,26 @@ describe("stripe webhook", () => {
     getAdminSupabase.mockReset();
     getHeaderValue.mockReset();
     parseNetlifyRequestBody.mockReset();
+    insertAuditLog.mockReset();
 
-    getAdminSupabase.mockReturnValue({});
+    getAdminSupabase.mockReturnValue({
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+            order: vi.fn(() => ({
+              limit: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+              })),
+            })),
+          })),
+        })),
+        update: vi.fn(() => ({
+          eq: vi.fn(async () => ({ error: null })),
+        })),
+        insert: vi.fn(async () => ({ error: null })),
+      })),
+    });
     getHeaderValue.mockReturnValue("sig_test");
     parseNetlifyRequestBody.mockReturnValue("{}");
     process.env.STRIPE_SECRET_KEY = "sk_test";
@@ -57,6 +77,7 @@ describe("stripe webhook", () => {
   });
 
   it("syncs payment method updates when Stripe reports a changed card", async () => {
+    const admin = getAdminSupabase();
     constructEventMock.mockReturnValue({
       id: "evt_pm_updated",
       type: "payment_method.updated",
@@ -76,7 +97,7 @@ describe("stripe webhook", () => {
     });
 
     expect(syncBillingAccountPaymentMethodByCustomerId).toHaveBeenCalledWith({
-      admin: {},
+      admin,
       stripe: expect.any(Object),
       customerId: "cus_123",
       auditAction: "billing.payment_method.updated",
@@ -86,6 +107,7 @@ describe("stripe webhook", () => {
   });
 
   it("marks the payment method as attention-required after invoice failures", async () => {
+    const admin = getAdminSupabase();
     constructEventMock.mockReturnValue({
       id: "evt_invoice_failed",
       type: "invoice.payment_failed",
@@ -105,12 +127,84 @@ describe("stripe webhook", () => {
     });
 
     expect(syncBillingAccountPaymentMethodByCustomerId).toHaveBeenCalledWith({
-      admin: {},
+      admin,
       stripe: expect.any(Object),
       customerId: "cus_456",
       preferredStatus: "attention",
       auditAction: "billing.payment_method.requires_attention",
       stripeEventId: "evt_invoice_failed",
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("records DependableQA auto-recharge payment intent successes from metadata", async () => {
+    const admin = {
+      from: vi.fn((table: string) => {
+        if (table === "billing_accounts") {
+          return {
+            update: vi.fn(() => ({
+              eq: vi.fn(async () => ({ error: null })),
+            })),
+          };
+        }
+
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+            })),
+          })),
+        };
+      }),
+    };
+    getAdminSupabase.mockReturnValue(admin);
+    constructEventMock.mockReturnValue({
+      id: "evt_pi_succeeded",
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: "pi_123",
+          amount: 5000,
+          customer: "cus_789",
+          metadata: {
+            app: "dependableQA",
+            source: "dependableQA",
+            environment: "test",
+            organizationId: "org_789",
+            billingAccountId: "bill_789",
+            flow: "payment_intent_auto_recharge",
+          },
+        },
+      },
+    });
+
+    const response = await handler({
+      httpMethod: "POST",
+      body: "{}",
+      headers: {
+        "stripe-signature": "sig_test",
+      },
+    });
+
+    expect(insertAuditLog).toHaveBeenCalledWith(admin, {
+      organizationId: "org_789",
+      actorUserId: null,
+      entityType: "billing_account",
+      entityId: "bill_789",
+      action: "billing.auto_recharge.succeeded",
+      metadata: {
+        summary: "Auto-recharge payment intent succeeded for 5000 cents.",
+        amountCents: 5000,
+        stripeEventId: "evt_pi_succeeded",
+        stripePaymentIntentId: "pi_123",
+      },
+    });
+    expect(syncBillingAccountPaymentMethodByCustomerId).toHaveBeenCalledWith({
+      admin,
+      stripe: expect.any(Object),
+      customerId: "cus_789",
+      auditAction: "billing.payment_method.updated",
+      stripeEventId: "evt_pi_succeeded",
     });
     expect(response.statusCode).toBe(200);
   });

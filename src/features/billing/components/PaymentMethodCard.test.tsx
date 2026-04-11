@@ -5,7 +5,12 @@ import { PaymentMethodCard } from "./PaymentMethodCard";
 describe("PaymentMethodCard", () => {
   it("renders the missing payment method state", () => {
     const html = renderToStaticMarkup(
-      <PaymentMethodCard paymentMethod={null} isRefreshing={false} manageHref="/api/billing/portal" />
+      <PaymentMethodCard
+        paymentMethod={null}
+        isRefreshing={false}
+        setupHref="/api/billing/setup-checkout"
+        portalHref="/api/billing/portal"
+      />
     );
 
     expect(html.includes("No payment method on file")).toBe(true);
@@ -25,7 +30,8 @@ describe("PaymentMethodCard", () => {
           lastChargeAt: "2026-04-10T12:00:00.000Z",
         }}
         isRefreshing={false}
-        manageHref="/api/billing/portal"
+        setupHref="/api/billing/setup-checkout"
+        portalHref="/api/billing/portal"
       />
     );
 
@@ -46,7 +52,8 @@ describe("PaymentMethodCard", () => {
           lastChargeAt: null,
         }}
         isRefreshing={false}
-        manageHref="/api/billing/portal"
+        setupHref="/api/billing/setup-checkout"
+        portalHref="/api/billing/portal"
       />
     );
 

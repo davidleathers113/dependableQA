@@ -4,7 +4,8 @@ import type { BillingPaymentMethodSummary } from "../../../lib/app-data";
 interface Props {
   paymentMethod: BillingPaymentMethodSummary | null;
   isRefreshing: boolean;
-  manageHref: string;
+  setupHref: string;
+  portalHref: string;
 }
 
 function getStatusCopy(paymentMethod: BillingPaymentMethodSummary | null) {
@@ -66,7 +67,7 @@ function getStatusCopy(paymentMethod: BillingPaymentMethodSummary | null) {
   };
 }
 
-export function PaymentMethodCard({ paymentMethod, isRefreshing, manageHref }: Props) {
+export function PaymentMethodCard({ paymentMethod, isRefreshing, setupHref, portalHref }: Props) {
   const copy = getStatusCopy(paymentMethod);
 
   return (
@@ -85,13 +86,13 @@ export function PaymentMethodCard({ paymentMethod, isRefreshing, manageHref }: P
         </div>
         <div className="flex flex-wrap gap-3">
           <a
-            href={manageHref}
+            href={setupHref}
             className="inline-flex rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-100 transition-colors hover:bg-slate-800"
           >
             {copy.cta}
           </a>
           <a
-            href={manageHref}
+            href={portalHref}
             className="inline-flex rounded-lg px-1 py-2 text-sm font-semibold text-violet-300 transition-colors hover:text-violet-200"
           >
             Manage in Stripe

@@ -29,11 +29,17 @@ function BillingPageInner({ organizationId, initialData }: Props) {
   const [isEditRechargeOpen, setIsEditRechargeOpen] = React.useState(false);
   const data = billingQuery.data;
   const portalHref = "/api/billing/portal";
+  const setupHref = "/api/billing/setup-checkout";
+  const fundHref = `/api/billing/fund-checkout?amount=${(data.rechargeAmountCents / 100).toFixed(2)}`;
   const canEditRecharge = Boolean(data.accountId);
 
   const handlePortalOpen = React.useCallback(() => {
     window.location.assign(portalHref);
-  }, []);
+  }, [portalHref]);
+
+  const handleSetupOpen = React.useCallback(() => {
+    window.location.assign(setupHref);
+  }, [setupHref]);
 
   const handleHealthAction = React.useCallback(() => {
     if (data.health.actionKind === "edit_recharge") {
@@ -46,8 +52,13 @@ function BillingPageInner({ organizationId, initialData }: Props) {
       return;
     }
 
+    if (data.health.actionKind === "update_card" || data.health.actionKind === "setup_billing") {
+      handleSetupOpen();
+      return;
+    }
+
     handlePortalOpen();
-  }, [data.health.actionKind, handlePortalOpen]);
+  }, [data.health.actionKind, handlePortalOpen, handleSetupOpen]);
 
   return (
     <section className="space-y-6">
@@ -84,7 +95,7 @@ function BillingPageInner({ organizationId, initialData }: Props) {
           Edit auto-recharge
         </button>
         <a
-          href={portalHref}
+          href={setupHref}
           className="inline-flex rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-100 transition-colors hover:bg-slate-800"
         >
           Update payment method
@@ -111,7 +122,12 @@ function BillingPageInner({ organizationId, initialData }: Props) {
           isRefreshing={billingQuery.isFetching}
           onEdit={() => setIsEditRechargeOpen(true)}
         />
-        <PaymentMethodCard paymentMethod={data.paymentMethod} isRefreshing={billingQuery.isFetching} manageHref={portalHref} />
+        <PaymentMethodCard
+          paymentMethod={data.paymentMethod}
+          isRefreshing={billingQuery.isFetching}
+          setupHref={setupHref}
+          portalHref={portalHref}
+        />
         <RunwayCard runway={data.runway} isRefreshing={billingQuery.isFetching} />
       </div>
 
@@ -134,6 +150,7 @@ function BillingPageInner({ organizationId, initialData }: Props) {
       <AddFundsModal
         isOpen={isAddFundsOpen}
         currentBalanceCents={data.currentBalanceCents}
+        fundHref={fundHref}
         portalHref={portalHref}
         onClose={() => setIsAddFundsOpen(false)}
       />

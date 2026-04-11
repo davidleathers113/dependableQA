@@ -150,7 +150,7 @@ describe("billing summary helpers", () => {
       title: "Set up billing to start processing calls",
       description: "Add a payment method and configure wallet funding to enable call processing.",
       actionLabel: "Set up billing",
-      actionKind: "open_portal",
+      actionKind: "setup_billing",
     });
   });
 });

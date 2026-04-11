@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import type { Database } from "../../../supabase/types";
 import type { BillingPaymentMethodStatus } from "../app-data";
 import { insertAuditLog } from "../app-data";
+import { buildDependableQAStripeMetadata } from "./metadata";
 
 type AdminClient = SupabaseClient<Database>;
 type BillingAccountRow = Database["public"]["Tables"]["billing_accounts"]["Row"];
@@ -11,6 +12,7 @@ type BillingAccountUpdate = Database["public"]["Tables"]["billing_accounts"]["Up
 interface EnsureStripeCustomerInput {
   admin: AdminClient;
   stripe: Stripe;
+  secretKey: string;
   billingAccount: Pick<BillingAccountRow, "id" | "billing_email" | "stripe_customer_id">;
   organizationId: string;
   organizationName: string;
@@ -155,6 +157,7 @@ function buildPaymentMethodAuditSummary(update: BillingAccountUpdate) {
 export async function ensureStripeCustomerForBillingAccount({
   admin,
   stripe,
+  secretKey,
   billingAccount,
   organizationId,
   organizationName,
@@ -167,10 +170,12 @@ export async function ensureStripeCustomerForBillingAccount({
 
   const customer = await stripe.customers.create({
     email: billingAccount.billing_email ?? fallbackEmail,
-    metadata: {
+    metadata: buildDependableQAStripeMetadata({
+      secretKey,
       organizationId,
       billingAccountId: billingAccount.id,
-    },
+      flow: "customer",
+    }),
     name: organizationName,
   });
 

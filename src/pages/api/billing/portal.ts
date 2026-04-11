@@ -2,10 +2,12 @@ import type { APIRoute } from "astro";
 import Stripe from "stripe";
 import { insertAuditLog } from "../../../lib/app-data";
 import { requireApiSession } from "../../../lib/auth/request-session";
+import { syncBillingAccountPaymentMethodByCustomerId } from "../../../lib/stripe/payment-method-sync";
 import {
-  ensureStripeCustomerForBillingAccount,
-  syncBillingAccountPaymentMethodByCustomerId,
-} from "../../../lib/stripe/payment-method-sync";
+  canManageBilling,
+  ensureBillingRouteCustomer,
+  getBillingReturnUrl,
+} from "../../../lib/stripe/billing-routes";
 import { getAdminSupabase } from "../../../lib/supabase/admin-client";
 
 export const prerender = false;
@@ -16,6 +18,10 @@ export const GET: APIRoute = async (context) => {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  if (!canManageBilling(session.organization.role)) {
+    return new Response("Only owners, admins, and billing users can manage billing.", { status: 403 });
+  }
+
   const secretKey = import.meta.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
     return new Response("Missing Stripe secret key", { status: 500 });
@@ -23,28 +29,18 @@ export const GET: APIRoute = async (context) => {
 
   const stripe = new Stripe(secretKey);
   const admin = getAdminSupabase();
-  const accountResult = await admin
-    .from("billing_accounts")
-    .select("id, stripe_customer_id, billing_email")
-    .eq("organization_id", session.organization.id)
-    .single();
-
-  if (accountResult.error || !accountResult.data) {
-    return new Response(accountResult.error?.message ?? "Billing account not found", { status: 404 });
-  }
-
-  const account = accountResult.data;
+  let account;
   let customerId: string;
 
   try {
-    customerId = await ensureStripeCustomerForBillingAccount({
+    const billing = await ensureBillingRouteCustomer({
       admin,
       stripe,
-      billingAccount: account,
-      organizationId: session.organization.id,
-      organizationName: session.organization.name,
-      fallbackEmail: session.user.email,
+      secretKey,
+      session,
     });
+    account = billing.account;
+    customerId = billing.customerId;
   } catch (error) {
     return new Response(error instanceof Error ? error.message : "Unable to prepare billing customer.", {
       status: 500,
@@ -63,10 +59,9 @@ export const GET: APIRoute = async (context) => {
     }
   }
 
-  const appUrl = import.meta.env.APP_URL || new URL("/", context.request.url).origin;
   const portal = await stripe.billingPortal.sessions.create({
     customer: customerId,
-    return_url: `${appUrl}/app/billing`,
+    return_url: getBillingReturnUrl(context.request.url),
   });
 
   await insertAuditLog(admin, {

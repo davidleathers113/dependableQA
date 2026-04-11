@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { getAdminSupabase } from "../../src/lib/supabase/admin-client";
 import { insertAuditLog } from "../../src/lib/app-data";
 import { syncBillingAccountPaymentMethodByCustomerId } from "../../src/lib/stripe/payment-method-sync";
+import { getDependableQAStripeMetadataContext } from "../../src/lib/stripe/metadata";
 import { getHeaderValue, parseNetlifyRequestBody } from "../../src/server/netlify-request";
 
 function json(statusCode: number, body: Record<string, unknown>) {
@@ -32,6 +33,55 @@ function getCustomerId(value: string | Stripe.Customer | Stripe.DeletedCustomer 
   }
 
   return "";
+}
+
+async function getBillingAccountByCustomerId(admin: ReturnType<typeof getAdminSupabase>, customerId: string) {
+  const result = await admin
+    .from("billing_accounts")
+    .select("id, organization_id")
+    .eq("stripe_customer_id", customerId)
+    .maybeSingle();
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  return result.data ?? null;
+}
+
+async function resolveDependableQAAttribution(input: {
+  admin: ReturnType<typeof getAdminSupabase>;
+  metadata: Record<string, string> | null | undefined;
+  customerId?: string;
+}) {
+  const context = getDependableQAStripeMetadataContext(input.metadata);
+  if (context.isDependableQA && context.organizationId && context.billingAccountId) {
+    return {
+      organizationId: context.organizationId,
+      billingAccountId: context.billingAccountId,
+      flow: context.flow,
+      source: "metadata" as const,
+    };
+  }
+
+  if (input.customerId) {
+    const account = await getBillingAccountByCustomerId(input.admin, input.customerId);
+    if (account) {
+      return {
+        organizationId: String(account.organization_id),
+        billingAccountId: String(account.id),
+        flow: context.flow,
+        source: "customer" as const,
+      };
+    }
+  }
+
+  return {
+    organizationId: "",
+    billingAccountId: "",
+    flow: context.flow,
+    source: "none" as const,
+  };
 }
 
 export async function handler(event: {
@@ -71,10 +121,15 @@ export async function handler(event: {
 
   if (stripeEvent.type === "checkout.session.completed") {
     const session = stripeEvent.data.object as Stripe.Checkout.Session;
-    const organizationId = metadataValue(session.metadata, "organizationId");
-    const billingAccountId = metadataValue(session.metadata, "billingAccountId");
     const amountCents = session.amount_total ?? 0;
     const customerId = getCustomerId(session.customer);
+    const attribution = await resolveDependableQAAttribution({
+      admin,
+      metadata: session.metadata,
+      customerId,
+    });
+    const organizationId = attribution.organizationId;
+    const billingAccountId = attribution.billingAccountId;
 
     if (organizationId && billingAccountId && amountCents > 0) {
       const balanceResult = await admin
@@ -115,6 +170,7 @@ export async function handler(event: {
         metadata: {
           summary: `Applied ${amountCents} cents from Stripe checkout.`,
           stripeEventId: stripeEvent.id,
+          stripeFlow: attribution.flow || metadataValue(session.metadata, "flow"),
         },
       });
     }
@@ -126,6 +182,76 @@ export async function handler(event: {
         customerId,
         auditAction: "billing.payment_method.updated",
         stripeEventId: stripeEvent.id,
+      });
+    }
+  }
+
+  if (stripeEvent.type === "payment_intent.succeeded") {
+    const paymentIntent = stripeEvent.data.object as Stripe.PaymentIntent;
+    const customerId = getCustomerId(paymentIntent.customer);
+    const attribution = await resolveDependableQAAttribution({
+      admin,
+      metadata: paymentIntent.metadata,
+      customerId,
+    });
+
+    if (attribution.organizationId && attribution.billingAccountId && attribution.flow === "payment_intent_auto_recharge") {
+      await admin
+        .from("billing_accounts")
+        .update({
+          last_successful_charge_at: new Date().toISOString(),
+          stripe_customer_id: customerId || null,
+        })
+        .eq("id", attribution.billingAccountId);
+
+      await insertAuditLog(admin, {
+        organizationId: attribution.organizationId,
+        actorUserId: null,
+        entityType: "billing_account",
+        entityId: attribution.billingAccountId,
+        action: "billing.auto_recharge.succeeded",
+        metadata: {
+          summary: `Auto-recharge payment intent succeeded for ${paymentIntent.amount} cents.`,
+          amountCents: paymentIntent.amount,
+          stripeEventId: stripeEvent.id,
+          stripePaymentIntentId: paymentIntent.id,
+        },
+      });
+    }
+
+    if (customerId) {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId,
+        auditAction: "billing.payment_method.updated",
+        stripeEventId: stripeEvent.id,
+      });
+    }
+  }
+
+  if (stripeEvent.type === "payment_intent.payment_failed") {
+    const paymentIntent = stripeEvent.data.object as Stripe.PaymentIntent;
+    const customerId = getCustomerId(paymentIntent.customer);
+    const attribution = await resolveDependableQAAttribution({
+      admin,
+      metadata: paymentIntent.metadata,
+      customerId,
+    });
+
+    if (attribution.organizationId && attribution.billingAccountId && attribution.flow === "payment_intent_auto_recharge") {
+      await insertAuditLog(admin, {
+        organizationId: attribution.organizationId,
+        actorUserId: null,
+        entityType: "billing_account",
+        entityId: attribution.billingAccountId,
+        action: "billing.auto_recharge.failed",
+        metadata: {
+          summary: `Auto-recharge payment intent failed for ${paymentIntent.amount} cents.`,
+          amountCents: paymentIntent.amount,
+          stripeEventId: stripeEvent.id,
+          stripePaymentIntentId: paymentIntent.id,
+        },
       });
     }
   }
