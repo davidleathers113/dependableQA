@@ -180,42 +180,69 @@ export type Database = {
         Row: {
           autopay_enabled: boolean
           billing_email: string | null
+          card_brand: string | null
+          card_country: string | null
+          card_exp_month: number | null
+          card_exp_year: number | null
+          card_funding: string | null
+          card_last4: string | null
           created_at: string
           currency: string
           id: string
+          last_successful_charge_at: string | null
           organization_id: string
+          payment_method_status: string
           per_minute_rate_cents: number
           recharge_amount_cents: number
           recharge_threshold_cents: number
           stripe_customer_id: string | null
+          stripe_default_payment_method_id: string | null
           stripe_subscription_id: string | null
           updated_at: string
         }
         Insert: {
           autopay_enabled?: boolean
           billing_email?: string | null
+          card_brand?: string | null
+          card_country?: string | null
+          card_exp_month?: number | null
+          card_exp_year?: number | null
+          card_funding?: string | null
+          card_last4?: string | null
           created_at?: string
           currency?: string
           id?: string
+          last_successful_charge_at?: string | null
           organization_id: string
+          payment_method_status?: string
           per_minute_rate_cents?: number
           recharge_amount_cents?: number
           recharge_threshold_cents?: number
           stripe_customer_id?: string | null
+          stripe_default_payment_method_id?: string | null
           stripe_subscription_id?: string | null
           updated_at?: string
         }
         Update: {
           autopay_enabled?: boolean
           billing_email?: string | null
+          card_brand?: string | null
+          card_country?: string | null
+          card_exp_month?: number | null
+          card_exp_year?: number | null
+          card_funding?: string | null
+          card_last4?: string | null
           created_at?: string
           currency?: string
           id?: string
+          last_successful_charge_at?: string | null
           organization_id?: string
+          payment_method_status?: string
           per_minute_rate_cents?: number
           recharge_amount_cents?: number
           recharge_threshold_cents?: number
           stripe_customer_id?: string | null
+          stripe_default_payment_method_id?: string | null
           stripe_subscription_id?: string | null
           updated_at?: string
         }

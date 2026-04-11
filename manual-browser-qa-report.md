@@ -96,4 +96,124 @@ Deferred to second pass:
 
 ## Status
 
-Second write-flow pass pending. Findings from that pass will be appended below.
+Second write-flow pass complete. Findings are appended below.
+
+## Second-Pass Scope
+
+The second pass exercised seeded write flows, focusing on:
+
+- Saved view creation from the calls list
+- Review-state mutations on full call detail pages
+- Review-note save behavior
+- Flag status mutations on the flagged call
+- Disposition override readiness and submission behavior
+
+## Second-Pass Findings
+
+### 4. High: saved-view creation is not actionable from the calls page
+
+Attempted flow:
+
+- Navigate to `/app/calls`
+- Enter `QA Mutation View` into the saved-view name field
+- Blur the field and re-check button state
+
+Observed behavior:
+
+- The text field accepted the value.
+- `Save View` remained disabled throughout the interaction.
+- No save request was fired.
+
+Impact:
+
+- Users cannot create saved views from the current list UI.
+
+### 5. High: review and flag mutations succeed, but the full detail UI often stays stale
+
+I exercised state-changing actions on both seeded calls:
+
+- On flagged call `6fca0096-d281-4a3f-b56f-7cc7ba9fa78b`
+  - `Reopen Review` returned `200`
+  - `Dismiss Flag` returned `200`
+- On in-review call `3707afb1-2b63-44eb-86c0-6dc67e5afd84`
+  - `Confirm Disposition` returned `200`
+
+Database verification confirmed those writes persisted:
+
+- Flagged call moved to `current_review_status = reopened`
+- Its only flag moved to `status = dismissed`
+- In-review call moved to `current_review_status = reviewed`
+
+Observed UI behavior:
+
+- After successful POSTs, the page often continued showing the pre-mutation state or a partially stale state.
+- Example: after `Reopen Review`, the flagged call detail page still showed `reviewed` in the visible review summary until a later refresh cycle.
+- Example: the calls query used by detail refresh kept returning `406`, while sibling review/flag/audit queries succeeded.
+
+Impact:
+
+- Mutations are landing in the database, but operators cannot trust the page to reflect what just happened.
+- This is especially risky for QA/review workflows because users may retry actions or assume they failed.
+
+### 6. Medium: review-note saves persist, but the action flow is confusing and easy to double-submit
+
+Attempted flow on call `3707afb1-2b63-44eb-86c0-6dc67e5afd84`:
+
+- Fill review note with `QA pass note for seeded call`
+- Click `Save Review Note`
+
+Observed behavior:
+
+- The note save did persist to the database.
+- Multiple saved review rows were created while testing the flow.
+- The UI provided weak feedback about whether the save had actually completed.
+- After adjacent mutations, action buttons frequently entered a disabled-looking state that made follow-up actions ambiguous.
+
+Database verification confirmed the note text persisted in new `call_reviews` rows.
+
+Impact:
+
+- The write itself works.
+- The surrounding UX makes it easy to generate duplicate audit entries or repeat saves because the UI does not clearly settle into a trustworthy post-save state.
+
+### 7. Medium: disposition override could not be completed after successful prior mutations
+
+Attempted flow on call `3707afb1-2b63-44eb-86c0-6dc67e5afd84`:
+
+- Fill `Override disposition` with `Qualified`
+- Fill reason with `QA override validation`
+
+Observed behavior:
+
+- The fields accepted values.
+- At one point the override control became actionable immediately after a multi-field fill.
+- After subsequent review mutations, the same section repeatedly ended up disabled-looking or non-actionable even with both values populated.
+- No disposition override POST was observed.
+- Database verification showed no new `disposition_overrides` row for the call.
+
+Impact:
+
+- I could not complete the override path reliably in the browser.
+- This appears tied to the same stale/pending detail-page state that affects other post-mutation interactions.
+
+## Second-Pass Data Verification
+
+I verified the seeded workspace directly after the browser pass:
+
+- Call `6fca0096-d281-4a3f-b56f-7cc7ba9fa78b`
+  - `current_review_status` became `reopened`
+  - flag `Verify compliance disclosure` became `dismissed`
+- Call `3707afb1-2b63-44eb-86c0-6dc67e5afd84`
+  - `current_review_status` became `reviewed`
+  - new review rows were created with note text `QA pass note for seeded call`
+  - no disposition override row was created
+
+## Overall Summary
+
+The second pass changed my confidence profile:
+
+- Backend review and flag write endpoints are not dead; they do persist seeded changes.
+- The calls UX still has serious operational issues because list-level and detail-level state do not reliably stay in sync with those successful writes.
+- The drawer remains broken.
+- Saved-view creation remains blocked.
+- Some form-based detail actions become unreliable or visually stale after preceding mutations.

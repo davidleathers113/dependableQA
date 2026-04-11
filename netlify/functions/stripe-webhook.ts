@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { getAdminSupabase } from "../../src/lib/supabase/admin-client";
 import { insertAuditLog } from "../../src/lib/app-data";
+import { syncBillingAccountPaymentMethodByCustomerId } from "../../src/lib/stripe/payment-method-sync";
 import { getHeaderValue, parseNetlifyRequestBody } from "../../src/server/netlify-request";
 
 function json(statusCode: number, body: Record<string, unknown>) {
@@ -15,6 +16,22 @@ function json(statusCode: number, body: Record<string, unknown>) {
 
 function metadataValue(metadata: Record<string, string> | null | undefined, key: string) {
   return metadata?.[key] ?? "";
+}
+
+function getCustomerId(value: string | Stripe.Customer | Stripe.DeletedCustomer | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if ("id" in value && typeof value.id === "string") {
+    return value.id;
+  }
+
+  return "";
 }
 
 export async function handler(event: {
@@ -57,6 +74,7 @@ export async function handler(event: {
     const organizationId = metadataValue(session.metadata, "organizationId");
     const billingAccountId = metadataValue(session.metadata, "billingAccountId");
     const amountCents = session.amount_total ?? 0;
+    const customerId = getCustomerId(session.customer);
 
     if (organizationId && billingAccountId && amountCents > 0) {
       const balanceResult = await admin
@@ -80,6 +98,14 @@ export async function handler(event: {
         description: `Stripe checkout session ${session.id}`,
       });
 
+      await admin
+        .from("billing_accounts")
+        .update({
+          last_successful_charge_at: new Date().toISOString(),
+          stripe_customer_id: customerId || null,
+        })
+        .eq("id", billingAccountId);
+
       await insertAuditLog(admin, {
         organizationId,
         actorUserId: null,
@@ -90,6 +116,16 @@ export async function handler(event: {
           summary: `Applied ${amountCents} cents from Stripe checkout.`,
           stripeEventId: stripeEvent.id,
         },
+      });
+    }
+
+    if (customerId) {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId,
+        auditAction: "billing.payment_method.updated",
+        stripeEventId: stripeEvent.id,
       });
     }
   }
@@ -105,6 +141,83 @@ export async function handler(event: {
         stripe_subscription_id: subscription.id,
       })
       .eq("stripe_customer_id", customerId);
+
+    await syncBillingAccountPaymentMethodByCustomerId({
+      admin,
+      stripe,
+      customerId,
+      stripeEventId: stripeEvent.id,
+    });
+  }
+
+  if (stripeEvent.type === "payment_method.attached" || stripeEvent.type === "payment_method.updated") {
+    const paymentMethod = stripeEvent.data.object as Stripe.PaymentMethod;
+    const customerId = getCustomerId(paymentMethod.customer);
+    if (customerId) {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId,
+        auditAction: "billing.payment_method.updated",
+        stripeEventId: stripeEvent.id,
+      });
+    }
+  }
+
+  if (stripeEvent.type === "payment_method.detached") {
+    const paymentMethod = stripeEvent.data.object as Stripe.PaymentMethod;
+    const customerId = getCustomerId(paymentMethod.customer);
+    if (customerId) {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId,
+        auditAction: "billing.payment_method.removed",
+        stripeEventId: stripeEvent.id,
+      });
+    }
+  }
+
+  if (stripeEvent.type === "customer.updated") {
+    const customer = stripeEvent.data.object as Stripe.Customer;
+    if (!customer.deleted) {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId: customer.id,
+        auditAction: "billing.payment_method.updated",
+        stripeEventId: stripeEvent.id,
+      });
+    }
+  }
+
+  if (stripeEvent.type === "setup_intent.succeeded") {
+    const setupIntent = stripeEvent.data.object as Stripe.SetupIntent;
+    const customerId = getCustomerId(setupIntent.customer);
+    if (customerId) {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId,
+        auditAction: "billing.payment_method.updated",
+        stripeEventId: stripeEvent.id,
+      });
+    }
+  }
+
+  if (stripeEvent.type === "invoice.payment_failed") {
+    const invoice = stripeEvent.data.object as Stripe.Invoice;
+    const customerId = getCustomerId(invoice.customer);
+    if (customerId) {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId,
+        preferredStatus: "attention",
+        auditAction: "billing.payment_method.requires_attention",
+        stripeEventId: stripeEvent.id,
+      });
+    }
   }
 
   return json(200, { received: true });

@@ -18,6 +18,16 @@ function getStatusCopy(paymentMethod: BillingPaymentMethodSummary | null) {
     };
   }
 
+  if (paymentMethod.status === "attention") {
+    return {
+      primary: "Card needs attention",
+      secondary: "The saved payment method needs review before the next automatic charge",
+      status: "Needs attention",
+      statusClassName: "text-amber-300",
+      cta: "Update card",
+    };
+  }
+
   if (paymentMethod.status === "expired") {
     return {
       primary: "Card needs attention",
@@ -45,8 +55,11 @@ function getStatusCopy(paymentMethod: BillingPaymentMethodSummary | null) {
   }
 
   return {
-    primary: "Payment method managed in Stripe",
-    secondary: "Card details will appear here once available in app data",
+    primary: paymentMethod.status === "ready" ? "Default payment method ready" : "Payment method managed in Stripe",
+    secondary:
+      paymentMethod.status === "ready"
+        ? "Managed in Stripe and ready for future auto-recharge attempts"
+        : "Card details will appear here once available in app data",
     status: paymentMethod.status === "ready" ? "Ready for auto-recharge" : "Needs attention",
     statusClassName: paymentMethod.status === "ready" ? "text-emerald-300" : "text-amber-300",
     cta: "Update card",

@@ -5,6 +5,7 @@ import {
   deriveBillingHealthSummary,
   deriveBillingRunwaySummary,
   filtersToSearchParams,
+  getBillingPaymentMethodSummaryFromAccount,
   normalizeCallFilters,
 } from "./app-data";
 
@@ -63,6 +64,26 @@ describe("calls filter helpers", () => {
 });
 
 describe("billing summary helpers", () => {
+  it("maps persisted payment method fields into the billing summary shape", () => {
+    expect(
+      getBillingPaymentMethodSummaryFromAccount({
+        card_brand: "visa",
+        card_last4: "4242",
+        card_exp_month: 8,
+        card_exp_year: 2028,
+        payment_method_status: "ready",
+        last_successful_charge_at: "2026-04-10T12:00:00.000Z",
+      })
+    ).toEqual({
+      brand: "visa",
+      last4: "4242",
+      expMonth: 8,
+      expYear: 2028,
+      status: "ready",
+      lastChargeAt: "2026-04-10T12:00:00.000Z",
+    });
+  });
+
   it("derives projected runway and next recharge timing from recent debits", () => {
     const runway = deriveBillingRunwaySummary({
       currentBalanceCents: 150000,

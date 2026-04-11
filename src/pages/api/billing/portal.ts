@@ -2,6 +2,10 @@ import type { APIRoute } from "astro";
 import Stripe from "stripe";
 import { insertAuditLog } from "../../../lib/app-data";
 import { requireApiSession } from "../../../lib/auth/request-session";
+import {
+  ensureStripeCustomerForBillingAccount,
+  syncBillingAccountPaymentMethodByCustomerId,
+} from "../../../lib/stripe/payment-method-sync";
 import { getAdminSupabase } from "../../../lib/supabase/admin-client";
 
 export const prerender = false;
@@ -29,29 +33,33 @@ export const GET: APIRoute = async (context) => {
     return new Response(accountResult.error?.message ?? "Billing account not found", { status: 404 });
   }
 
-  const account = accountResult.data as Record<string, unknown>;
-  let customerId = String(account.stripe_customer_id ?? "");
+  const account = accountResult.data;
+  let customerId: string;
 
-  if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: String(account.billing_email ?? session.user.email),
-      metadata: {
-        organizationId: session.organization.id,
-      },
-      name: session.organization.name,
+  try {
+    customerId = await ensureStripeCustomerForBillingAccount({
+      admin,
+      stripe,
+      billingAccount: account,
+      organizationId: session.organization.id,
+      organizationName: session.organization.name,
+      fallbackEmail: session.user.email,
     });
+  } catch (error) {
+    return new Response(error instanceof Error ? error.message : "Unable to prepare billing customer.", {
+      status: 500,
+    });
+  }
 
-    customerId = customer.id;
-
-    const updateAccount = await admin
-      .from("billing_accounts")
-      .update({
-        stripe_customer_id: customerId,
-      })
-      .eq("id", String(account.id));
-
-    if (updateAccount.error) {
-      return new Response(updateAccount.error.message, { status: 500 });
+  if (String(account.stripe_customer_id ?? "").trim().length > 0) {
+    try {
+      await syncBillingAccountPaymentMethodByCustomerId({
+        admin,
+        stripe,
+        customerId,
+      });
+    } catch {
+      // Best-effort sync only. The portal should still open even if this refresh fails.
     }
   }
 

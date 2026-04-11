@@ -437,6 +437,19 @@ function asNumber(value: unknown) {
   return 0;
 }
 
+function asNullableNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
 function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
@@ -2038,13 +2051,43 @@ function summarizeBillingAuditEvent(row: Record<string, unknown>): BillingEventS
     return null;
   }
 
+  if (action === "billing.payment_method.updated") {
+    return {
+      id: `audit-${eventId}`,
+      type: "payment_method",
+      message: summary ?? "Default payment method updated",
+      createdAt,
+      tone: "success",
+    };
+  }
+
+  if (action === "billing.payment_method.removed") {
+    return {
+      id: `audit-${eventId}`,
+      type: "payment_method",
+      message: summary ?? "Default payment method removed",
+      createdAt,
+      tone: "warning",
+    };
+  }
+
+  if (action === "billing.payment_method.requires_attention") {
+    return {
+      id: `audit-${eventId}`,
+      type: "payment_method",
+      message: summary ?? "Default payment method requires attention",
+      createdAt,
+      tone: "critical",
+    };
+  }
+
   if (action.includes("payment_method")) {
     return {
       id: `audit-${eventId}`,
       type: "payment_method",
       message: summary ?? "Default payment method updated",
       createdAt,
-      tone: action.includes("failed") ? "critical" : "success",
+      tone: "info",
     };
   }
 
@@ -2181,6 +2224,16 @@ export function deriveBillingHealthSummary(input: {
     };
   }
 
+  if (input.paymentMethodStatus === "attention") {
+    return {
+      status: "critical",
+      title: "Payment method needs attention",
+      description: "Your default payment method needs review before the next automatic recharge attempt.",
+      actionLabel: "Update payment method",
+      actionKind: "update_card",
+    };
+  }
+
   if (!input.autopayEnabled) {
     return {
       status: "warning",
@@ -2220,11 +2273,37 @@ export function deriveBillingHealthSummary(input: {
   };
 }
 
+export function normalizeBillingPaymentMethodStatus(value: unknown): BillingPaymentMethodStatus {
+  const normalized = asString(value);
+  if (normalized === "ready" || normalized === "missing" || normalized === "expired" || normalized === "attention") {
+    return normalized;
+  }
+
+  return "missing";
+}
+
+export function getBillingPaymentMethodSummaryFromAccount(
+  account: Record<string, unknown> | null
+): BillingPaymentMethodSummary | null {
+  if (!account) {
+    return null;
+  }
+
+  return {
+    brand: asNullableString(account.card_brand),
+    last4: asNullableString(account.card_last4),
+    expMonth: asNullableNumber(account.card_exp_month),
+    expYear: asNullableNumber(account.card_exp_year),
+    status: normalizeBillingPaymentMethodStatus(account.payment_method_status),
+    lastChargeAt: asNullableString(account.last_successful_charge_at),
+  };
+}
+
 export async function getBillingSummary(client: SupabaseAny, organizationId: string): Promise<BillingSummary> {
   const [accountResult, ledgerResult, auditResult] = await Promise.all([
     client
       .from("billing_accounts")
-      .select("id, billing_email, autopay_enabled, recharge_threshold_cents, recharge_amount_cents, per_minute_rate_cents, stripe_customer_id")
+      .select("id, billing_email, autopay_enabled, recharge_threshold_cents, recharge_amount_cents, per_minute_rate_cents, stripe_customer_id, stripe_default_payment_method_id, card_brand, card_last4, card_exp_month, card_exp_year, card_funding, card_country, payment_method_status, last_successful_charge_at")
       .eq("organization_id", organizationId)
       .maybeSingle(),
     client
@@ -2267,18 +2346,7 @@ export async function getBillingSummary(client: SupabaseAny, organizationId: str
     } satisfies BillingLedgerEntrySummary;
   });
   const currentBalanceCents = ledger[0]?.balanceAfterCents ?? 0;
-  const lastSuccessfulChargeAt =
-    ledger.find((entry) => entry.amountCents > 0 && entry.status === "completed")?.createdAt ?? null;
-  const paymentMethod: BillingPaymentMethodSummary | null = account
-    ? {
-        brand: null,
-        last4: null,
-        expMonth: null,
-        expYear: null,
-        status: (asString(account.stripe_customer_id) ? "ready" : "missing") as BillingPaymentMethodStatus,
-        lastChargeAt: lastSuccessfulChargeAt,
-      }
-    : null;
+  const paymentMethod = getBillingPaymentMethodSummaryFromAccount(account);
   const paymentMethodStatus: BillingPaymentMethodStatus = paymentMethod?.status ?? "missing";
   const runway = deriveBillingRunwaySummary({
     currentBalanceCents,
