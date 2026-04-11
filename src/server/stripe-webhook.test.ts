@@ -24,24 +24,24 @@ vi.mock("stripe", () => ({
   },
 }));
 
-vi.mock("../../src/lib/supabase/admin-client", () => ({
+vi.mock("../lib/supabase/admin-client", () => ({
   getAdminSupabase,
 }));
 
-vi.mock("../../src/lib/stripe/payment-method-sync", () => ({
+vi.mock("../lib/stripe/payment-method-sync", () => ({
   syncBillingAccountPaymentMethodByCustomerId,
 }));
 
-vi.mock("../../src/lib/app-data", () => ({
+vi.mock("../lib/app-data", () => ({
   insertAuditLog,
 }));
 
-vi.mock("../../src/server/netlify-request", () => ({
+vi.mock("./netlify-request", () => ({
   getHeaderValue,
   parseNetlifyRequestBody,
 }));
 
-import { handler } from "./stripe-webhook";
+import { handler } from "../../netlify/functions/stripe-webhook";
 
 describe("stripe webhook", () => {
   beforeEach(() => {
