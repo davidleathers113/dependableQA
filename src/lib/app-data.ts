@@ -184,6 +184,67 @@ export interface ImportsPageData {
   batches: ImportBatchSummary[];
 }
 
+export type BillingHealthStatus = "healthy" | "warning" | "critical";
+export type BillingHealthActionKind =
+  | "edit_recharge"
+  | "update_card"
+  | "add_funds"
+  | "open_portal"
+  | "setup_billing"
+  | null;
+export type BillingPaymentMethodStatus = "ready" | "missing" | "expired" | "attention";
+export type BillingLedgerEntryType =
+  | "funding"
+  | "usage"
+  | "auto_recharge"
+  | "adjustment"
+  | "refund"
+  | "failed_recharge"
+  | string;
+export type BillingLedgerEntryStatus = "completed" | "applied" | "failed" | "pending" | string;
+
+export interface BillingPaymentMethodSummary {
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+  status: BillingPaymentMethodStatus;
+  lastChargeAt: string | null;
+}
+
+export interface BillingRunwaySummary {
+  projectedDaysRemaining: number | null;
+  averageDailySpendCents: number | null;
+  estimatedNextRechargeAt: string | null;
+}
+
+export interface BillingHealthSummary {
+  status: BillingHealthStatus;
+  title: string;
+  description: string;
+  actionLabel?: string | null;
+  actionKind?: BillingHealthActionKind;
+}
+
+export interface BillingLedgerEntrySummary {
+  id: string;
+  entryType: BillingLedgerEntryType;
+  status: BillingLedgerEntryStatus;
+  amountCents: number;
+  balanceAfterCents: number;
+  description: string | null;
+  reference: string | null;
+  createdAt: string;
+}
+
+export interface BillingEventSummary {
+  id: string;
+  type: "recharge" | "payment_method" | "settings" | "funding" | "alert" | "info";
+  message: string;
+  createdAt: string;
+  tone: "success" | "warning" | "critical" | "info";
+}
+
 export interface BillingSummary {
   accountId: string | null;
   billingEmail: string | null;
@@ -192,14 +253,11 @@ export interface BillingSummary {
   rechargeAmountCents: number;
   perMinuteRateCents: number;
   currentBalanceCents: number;
-  ledger: Array<{
-    id: string;
-    entryType: string;
-    amountCents: number;
-    balanceAfterCents: number;
-    description: string | null;
-    createdAt: string;
-  }>;
+  paymentMethod: BillingPaymentMethodSummary | null;
+  runway: BillingRunwaySummary;
+  health: BillingHealthSummary;
+  ledger: BillingLedgerEntrySummary[];
+  events: BillingEventSummary[];
 }
 
 export interface IntegrationCard {
@@ -1754,33 +1812,502 @@ export async function getImportBatchDetail(client: SupabaseAny, organizationId: 
   };
 }
 
+function humanizeBillingToken(value: string | null | undefined) {
+  const source = asString(value).trim();
+  if (!source) {
+    return "";
+  }
+
+  const parts = source
+    .split("_")
+    .join(" ")
+    .split("-")
+    .join(" ")
+    .split(" ")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+  return parts
+    .map((part) => part[0]?.toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function getBillingLedgerEntryType(
+  entryType: string,
+  amountCents: number,
+  referenceType: string | null
+): BillingLedgerEntryType {
+  const normalizedType = normalizeText(entryType);
+  const normalizedReferenceType = normalizeText(referenceType);
+
+  if (normalizedType.includes("fail")) {
+    return "failed_recharge";
+  }
+
+  if (
+    (normalizedType.includes("auto") && normalizedType.includes("recharge")) ||
+    (normalizedReferenceType.includes("stripe") && amountCents > 0)
+  ) {
+    return "auto_recharge";
+  }
+
+  if (
+    normalizedType.includes("fund") ||
+    normalizedType.includes("top") ||
+    normalizedType.includes("credit")
+  ) {
+    return "funding";
+  }
+
+  if (normalizedType.includes("refund")) {
+    return "refund";
+  }
+
+  if (normalizedType.includes("adjust")) {
+    return "adjustment";
+  }
+
+  if (normalizedType.includes("usage") || amountCents < 0) {
+    return "usage";
+  }
+
+  if (amountCents > 0) {
+    return "funding";
+  }
+
+  return entryType || "adjustment";
+}
+
+function getBillingLedgerStatus(
+  entryType: string,
+  amountCents: number,
+  normalizedType: BillingLedgerEntryType
+): BillingLedgerEntryStatus {
+  const lower = normalizeText(entryType);
+
+  if (lower.includes("fail")) {
+    return "failed";
+  }
+
+  if (lower.includes("pending")) {
+    return "pending";
+  }
+
+  if (normalizedType === "usage") {
+    return "applied";
+  }
+
+  if (amountCents === 0 && normalizedType === "failed_recharge") {
+    return "failed";
+  }
+
+  return "completed";
+}
+
+function getBillingLedgerDescription(
+  description: string | null,
+  entryType: BillingLedgerEntryType,
+  status: BillingLedgerEntryStatus
+) {
+  if (description) {
+    return description;
+  }
+
+  if (entryType === "funding") {
+    return "Manual wallet funding";
+  }
+
+  if (entryType === "usage") {
+    return "Processed call minutes";
+  }
+
+  if (entryType === "auto_recharge") {
+    return "Automatic wallet top-up";
+  }
+
+  if (entryType === "failed_recharge" || status === "failed") {
+    return "Automatic wallet top-up";
+  }
+
+  if (entryType === "refund") {
+    return "Wallet refund";
+  }
+
+  if (entryType === "adjustment") {
+    return "Wallet balance adjustment";
+  }
+
+  return humanizeBillingToken(entryType) || "Wallet activity";
+}
+
+function getBillingLedgerReference(referenceType: string | null, referenceId: string | null, entryType: BillingLedgerEntryType) {
+  const humanizedReferenceType = humanizeBillingToken(referenceType);
+  if (humanizedReferenceType) {
+    return humanizedReferenceType;
+  }
+
+  if (entryType === "usage") {
+    return "Call processing";
+  }
+
+  if (entryType === "auto_recharge") {
+    return "Stripe recharge";
+  }
+
+  if (entryType === "failed_recharge") {
+    return "Payment failed";
+  }
+
+  if (entryType === "funding") {
+    return "Top-up";
+  }
+
+  return referenceId ? referenceId.slice(0, 8) : null;
+}
+
+function summarizeLedgerEvent(entry: BillingLedgerEntrySummary): BillingEventSummary | null {
+  if (entry.entryType === "usage") {
+    return null;
+  }
+
+  if (entry.entryType === "auto_recharge" && entry.status === "completed") {
+    return {
+      id: `ledger-${entry.id}`,
+      type: "recharge",
+      message: `Auto-recharge of ${formatCurrency(entry.amountCents)} succeeded`,
+      createdAt: entry.createdAt,
+      tone: "success",
+    };
+  }
+
+  if (entry.entryType === "failed_recharge" || entry.status === "failed") {
+    return {
+      id: `ledger-${entry.id}`,
+      type: "alert",
+      message: "Recent auto-recharge attempt failed",
+      createdAt: entry.createdAt,
+      tone: "critical",
+    };
+  }
+
+  if (entry.entryType === "funding") {
+    return {
+      id: `ledger-${entry.id}`,
+      type: "funding",
+      message: `Manual top-up of ${formatCurrency(entry.amountCents)} completed`,
+      createdAt: entry.createdAt,
+      tone: "success",
+    };
+  }
+
+  if (entry.entryType === "refund") {
+    return {
+      id: `ledger-${entry.id}`,
+      type: "info",
+      message: `Refund of ${formatCurrency(entry.amountCents)} posted`,
+      createdAt: entry.createdAt,
+      tone: "info",
+    };
+  }
+
+  if (entry.entryType === "adjustment") {
+    return {
+      id: `ledger-${entry.id}`,
+      type: "info",
+      message: "Wallet balance adjusted",
+      createdAt: entry.createdAt,
+      tone: "info",
+    };
+  }
+
+  return null;
+}
+
+function summarizeBillingAuditEvent(row: Record<string, unknown>): BillingEventSummary | null {
+  const action = asString(row.action);
+  const metadata = asRecord(row.metadata);
+  const summary = asNullableString(metadata?.summary);
+  const createdAt = asString(row.created_at);
+  const eventId = asString(row.id);
+
+  if (!action || !createdAt || !eventId) {
+    return null;
+  }
+
+  if (action === "billing.portal.opened") {
+    return null;
+  }
+
+  if (action.includes("payment_method")) {
+    return {
+      id: `audit-${eventId}`,
+      type: "payment_method",
+      message: summary ?? "Default payment method updated",
+      createdAt,
+      tone: action.includes("failed") ? "critical" : "success",
+    };
+  }
+
+  if (action.includes("recharge_settings") || action.includes("billing.settings")) {
+    return {
+      id: `audit-${eventId}`,
+      type: "settings",
+      message: summary ?? "Auto-recharge settings updated",
+      createdAt,
+      tone: "info",
+    };
+  }
+
+  if (action.startsWith("billing.")) {
+    return {
+      id: `audit-${eventId}`,
+      type: "info",
+      message: summary ?? humanizeBillingToken(action),
+      createdAt,
+      tone: action.includes("failed") ? "critical" : "info",
+    };
+  }
+
+  return null;
+}
+
+export function deriveBillingRunwaySummary(input: {
+  currentBalanceCents: number;
+  rechargeThresholdCents: number;
+  autopayEnabled: boolean;
+  ledger: Array<Pick<BillingLedgerEntrySummary, "amountCents" | "createdAt" | "entryType" | "status">>;
+}): BillingRunwaySummary {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const windowStart = now - 30 * dayMs;
+  const spendEntries = input.ledger.filter((entry) => {
+    if (entry.amountCents >= 0) {
+      return false;
+    }
+
+    const createdAtMs = new Date(entry.createdAt).getTime();
+    return Number.isFinite(createdAtMs) && createdAtMs >= windowStart;
+  });
+
+  if (spendEntries.length === 0) {
+    return {
+      projectedDaysRemaining: null,
+      averageDailySpendCents: null,
+      estimatedNextRechargeAt: null,
+    };
+  }
+
+  let oldestCreatedAt = now;
+  let newestCreatedAt = now;
+  let totalSpendCents = 0;
+
+  for (const entry of spendEntries) {
+    const createdAtMs = new Date(entry.createdAt).getTime();
+    oldestCreatedAt = Math.min(oldestCreatedAt, createdAtMs);
+    newestCreatedAt = Math.max(newestCreatedAt, createdAtMs);
+    totalSpendCents += Math.abs(entry.amountCents);
+  }
+
+  const observedDays = Math.max((newestCreatedAt - oldestCreatedAt) / dayMs, 1);
+  const averageDailySpendCents = Math.round(totalSpendCents / observedDays);
+  if (averageDailySpendCents <= 0) {
+    return {
+      projectedDaysRemaining: null,
+      averageDailySpendCents: null,
+      estimatedNextRechargeAt: null,
+    };
+  }
+
+  const projectedDaysRemaining = Number((Math.max(input.currentBalanceCents, 0) / averageDailySpendCents).toFixed(1));
+  let estimatedNextRechargeAt: string | null = null;
+
+  if (input.autopayEnabled) {
+    if (input.currentBalanceCents <= input.rechargeThresholdCents) {
+      estimatedNextRechargeAt = new Date(now).toISOString();
+    } else {
+      const centsUntilThreshold = input.currentBalanceCents - input.rechargeThresholdCents;
+      const daysUntilRecharge = centsUntilThreshold / averageDailySpendCents;
+      estimatedNextRechargeAt = new Date(now + daysUntilRecharge * dayMs).toISOString();
+    }
+  }
+
+  return {
+    projectedDaysRemaining,
+    averageDailySpendCents,
+    estimatedNextRechargeAt,
+  };
+}
+
+export function deriveBillingHealthSummary(input: {
+  accountId: string | null;
+  autopayEnabled: boolean;
+  currentBalanceCents: number;
+  rechargeThresholdCents: number;
+  paymentMethodStatus: BillingPaymentMethodStatus;
+  projectedDaysRemaining: number | null;
+  latestLedgerEntry: Pick<BillingLedgerEntrySummary, "entryType" | "status"> | null;
+}): BillingHealthSummary {
+  if (!input.accountId) {
+    return {
+      status: "critical",
+      title: "Set up billing to start processing calls",
+      description: "Add a payment method and configure wallet funding to enable call processing.",
+      actionLabel: "Set up billing",
+      actionKind: "open_portal",
+    };
+  }
+
+  if (
+    input.latestLedgerEntry &&
+    (input.latestLedgerEntry.entryType === "failed_recharge" || input.latestLedgerEntry.status === "failed")
+  ) {
+    return {
+      status: "critical",
+      title: "Recent recharge failed",
+      description:
+        "Your last automatic recharge attempt was unsuccessful. Update your payment method to avoid interruption.",
+      actionLabel: "Update payment method",
+      actionKind: "update_card",
+    };
+  }
+
+  if (input.paymentMethodStatus === "missing" || input.paymentMethodStatus === "expired") {
+    return {
+      status: "critical",
+      title: "No valid payment method on file",
+      description: "Auto-recharge cannot run until a default payment method is added.",
+      actionLabel: "Update payment method",
+      actionKind: "update_card",
+    };
+  }
+
+  if (!input.autopayEnabled) {
+    return {
+      status: "warning",
+      title: "Auto-recharge is turned off",
+      description: "Your balance will not replenish automatically when it drops below the threshold.",
+      actionLabel: "Turn on auto-recharge",
+      actionKind: "edit_recharge",
+    };
+  }
+
+  if (input.currentBalanceCents <= 0 || input.currentBalanceCents <= input.rechargeThresholdCents) {
+    return {
+      status: "warning",
+      title: "Balance is below your preferred operating buffer",
+      description: "Your current balance is already below the configured recharge threshold.",
+      actionLabel: "Add funds",
+      actionKind: "add_funds",
+    };
+  }
+
+  if (input.projectedDaysRemaining !== null && input.projectedDaysRemaining <= 3) {
+    return {
+      status: "warning",
+      title: "Recharge likely soon",
+      description: "Your current usage suggests a recharge may be triggered soon.",
+      actionLabel: "Review recharge settings",
+      actionKind: "edit_recharge",
+    };
+  }
+
+  return {
+    status: "healthy",
+    title: "Billing healthy",
+    description: "Auto-recharge is enabled and your default payment method is ready.",
+    actionLabel: "Open Stripe billing portal",
+    actionKind: "open_portal",
+  };
+}
+
 export async function getBillingSummary(client: SupabaseAny, organizationId: string): Promise<BillingSummary> {
-  const [accountResult, ledgerResult] = await Promise.all([
+  const [accountResult, ledgerResult, auditResult] = await Promise.all([
     client
       .from("billing_accounts")
-      .select("id, billing_email, autopay_enabled, recharge_threshold_cents, recharge_amount_cents, per_minute_rate_cents")
+      .select("id, billing_email, autopay_enabled, recharge_threshold_cents, recharge_amount_cents, per_minute_rate_cents, stripe_customer_id")
       .eq("organization_id", organizationId)
       .maybeSingle(),
     client
       .from("wallet_ledger_entries")
-      .select("id, entry_type, amount_cents, balance_after_cents, description, created_at")
+      .select("id, entry_type, amount_cents, balance_after_cents, description, reference_id, reference_type, created_at")
       .eq("organization_id", organizationId)
       .order("created_at", { ascending: false })
-      .limit(50),
+      .limit(100),
+    client
+      .from("audit_logs")
+      .select("id, action, metadata, created_at")
+      .eq("organization_id", organizationId)
+      .eq("entity_type", "billing_account")
+      .order("created_at", { ascending: false })
+      .limit(25),
   ]);
 
   assertNoError(accountResult.error, "Unable to load billing account.");
   assertNoError(ledgerResult.error, "Unable to load ledger.");
+  assertNoError(auditResult.error, "Unable to load billing activity.");
 
   const account = (accountResult.data ?? null) as Record<string, unknown> | null;
-  const ledger = ((ledgerResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
-    id: asString(row.id),
-    entryType: asString(row.entry_type),
-    amountCents: asNumber(row.amount_cents),
-    balanceAfterCents: asNumber(row.balance_after_cents),
-    description: asNullableString(row.description),
-    createdAt: asString(row.created_at),
-  }));
+  const ledger = ((ledgerResult.data ?? []) as Array<Record<string, unknown>>).map((row) => {
+    const rawEntryType = asString(row.entry_type);
+    const amountCents = asNumber(row.amount_cents);
+    const referenceType = asNullableString(row.reference_type);
+    const referenceId = asNullableString(row.reference_id);
+    const entryType = getBillingLedgerEntryType(rawEntryType, amountCents, referenceType);
+    const status = getBillingLedgerStatus(rawEntryType, amountCents, entryType);
+
+    return {
+      id: asString(row.id),
+      entryType,
+      status,
+      amountCents,
+      balanceAfterCents: asNumber(row.balance_after_cents),
+      description: getBillingLedgerDescription(asNullableString(row.description), entryType, status),
+      reference: getBillingLedgerReference(referenceType, referenceId, entryType),
+      createdAt: asString(row.created_at),
+    } satisfies BillingLedgerEntrySummary;
+  });
+  const currentBalanceCents = ledger[0]?.balanceAfterCents ?? 0;
+  const lastSuccessfulChargeAt =
+    ledger.find((entry) => entry.amountCents > 0 && entry.status === "completed")?.createdAt ?? null;
+  const paymentMethod: BillingPaymentMethodSummary | null = account
+    ? {
+        brand: null,
+        last4: null,
+        expMonth: null,
+        expYear: null,
+        status: (asString(account.stripe_customer_id) ? "ready" : "missing") as BillingPaymentMethodStatus,
+        lastChargeAt: lastSuccessfulChargeAt,
+      }
+    : null;
+  const paymentMethodStatus: BillingPaymentMethodStatus = paymentMethod?.status ?? "missing";
+  const runway = deriveBillingRunwaySummary({
+    currentBalanceCents,
+    rechargeThresholdCents: account ? asNumber(account.recharge_threshold_cents) : 0,
+    autopayEnabled: account ? asBoolean(account.autopay_enabled) : false,
+    ledger,
+  });
+  const health = deriveBillingHealthSummary({
+    accountId: account ? asString(account.id) : null,
+    autopayEnabled: account ? asBoolean(account.autopay_enabled) : false,
+    currentBalanceCents,
+    rechargeThresholdCents: account ? asNumber(account.recharge_threshold_cents) : 0,
+    paymentMethodStatus,
+    projectedDaysRemaining: runway.projectedDaysRemaining,
+    latestLedgerEntry: ledger[0] ?? null,
+  });
+  const ledgerEvents = ledger
+    .map((entry) => summarizeLedgerEvent(entry))
+    .filter((entry): entry is BillingEventSummary => Boolean(entry));
+  const auditEvents = ((auditResult.data ?? []) as Array<Record<string, unknown>>)
+    .map((row) => summarizeBillingAuditEvent(row))
+    .filter((entry): entry is BillingEventSummary => Boolean(entry));
+  const events = [...ledgerEvents, ...auditEvents]
+    .sort((left, right) => {
+      if (left.createdAt < right.createdAt) return 1;
+      if (left.createdAt > right.createdAt) return -1;
+      return 0;
+    })
+    .slice(0, 8);
 
   return {
     accountId: account ? asString(account.id) : null,
@@ -1789,8 +2316,12 @@ export async function getBillingSummary(client: SupabaseAny, organizationId: str
     rechargeThresholdCents: account ? asNumber(account.recharge_threshold_cents) : 0,
     rechargeAmountCents: account ? asNumber(account.recharge_amount_cents) : 0,
     perMinuteRateCents: account ? asNumber(account.per_minute_rate_cents) : 0,
-    currentBalanceCents: ledger[0]?.balanceAfterCents ?? 0,
+    currentBalanceCents,
+    paymentMethod,
+    runway,
+    health,
     ledger,
+    events,
   };
 }
 
