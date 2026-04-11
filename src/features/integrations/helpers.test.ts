@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { IntegrationCard } from "../../lib/app-data";
-import { getDiagnosticsSummary, getIntegrationHealth, getSecretSourceLabel } from "./helpers";
+import {
+  getDiagnosticsSummary,
+  getDiagnosticsSummaryLine,
+  getIntegrationHealth,
+  getIntegrationSummaryMeta,
+  getSecretSourceLabel,
+} from "./helpers";
 
 function createIntegration(overrides: Partial<IntegrationCard> = {}): IntegrationCard {
   return {
@@ -123,5 +129,43 @@ describe("integration helpers", () => {
       errorCount: 1,
       lastReceivedAt: "2026-04-10T00:00:00.000Z",
     });
+  });
+
+  it("builds summary metadata for the summary card layer", () => {
+    const meta = getIntegrationSummaryMeta(
+      createIntegration({
+        lastSuccessAt: "2026-04-10T00:00:00.000Z",
+      })
+    );
+
+    expect(meta.setupModelDescription).toBe("Webhook ingest with signed provider payloads.");
+    expect(meta.latestStatusLabel.startsWith("Last success:")).toBe(true);
+    expect(meta.primaryActionLabel).toBe("Configure");
+  });
+
+  it("uses a warning-oriented diagnostics summary line for degraded integrations", () => {
+    const line = getDiagnosticsSummaryLine(
+      createIntegration({
+        webhookAuth: {
+          authType: "hmac-sha256",
+          headerName: "x-dependableqa-signature",
+          prefix: "sha256=",
+          secretConfigured: true,
+          secretSource: "integration",
+        },
+        lastEventSeverity: "warning",
+        recentEvents: [
+          {
+            id: "event-1",
+            eventType: "webhook.warning",
+            severity: "warning",
+            message: "Delayed",
+            createdAt: "2026-04-09T00:00:00.000Z",
+          },
+        ],
+      })
+    );
+
+    expect(line).toBe("Recent webhook events need attention. Review the latest messages below.");
   });
 });

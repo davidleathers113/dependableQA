@@ -13,6 +13,12 @@ export interface IntegrationHealthSummary {
   description: string;
 }
 
+export interface IntegrationSummaryMeta {
+  setupModelDescription: string;
+  latestStatusLabel: string;
+  primaryActionLabel: string;
+}
+
 export function formatIntegrationDateTime(value: string | null) {
   if (!value) {
     return "—";
@@ -74,6 +80,22 @@ export function getIntegrationProviderLabel(provider: IntegrationProvider) {
   return "Custom";
 }
 
+export function getIntegrationSetupModelDescription(provider: IntegrationProvider) {
+  if (provider === "ringba") {
+    return "Webhook ingest with signed provider payloads.";
+  }
+
+  if (provider === "trackdrive") {
+    return "JSON POST webhook. One connection can cover all configured sources.";
+  }
+
+  if (provider === "retreaver") {
+    return "Webhook or export-based ingest for call event processing.";
+  }
+
+  return "Custom provider webhook delivery with request verification.";
+}
+
 export function getIntegrationHealth(integration: IntegrationCard): IntegrationHealthSummary {
   const hasSecret = integration.webhookAuth.secretConfigured;
   const hasSuccess = Boolean(integration.lastSuccessAt);
@@ -127,6 +149,31 @@ export function getWebhookEndpointUrl() {
   return new URL("/.netlify/functions/integration-ingest", window.location.origin).toString();
 }
 
+export function getIntegrationLatestStatusLabel(integration: IntegrationCard) {
+  if (integration.lastErrorAt) {
+    return `Last error: ${formatIntegrationDateTime(integration.lastErrorAt)}`;
+  }
+
+  if (integration.lastSuccessAt) {
+    return `Last success: ${formatIntegrationDateTime(integration.lastSuccessAt)}`;
+  }
+
+  return "No events received yet";
+}
+
+export function getIntegrationPrimaryActionLabel(integration: IntegrationCard) {
+  const health = getIntegrationHealth(integration);
+  return health.state === "needs-configuration" ? "Configure" : "Open details";
+}
+
+export function getIntegrationSummaryMeta(integration: IntegrationCard): IntegrationSummaryMeta {
+  return {
+    setupModelDescription: getIntegrationSetupModelDescription(integration.provider),
+    latestStatusLabel: getIntegrationLatestStatusLabel(integration),
+    primaryActionLabel: getIntegrationPrimaryActionLabel(integration),
+  };
+}
+
 export function getSecretSourceLabel(secretSource: IntegrationCard["webhookAuth"]["secretSource"]) {
   if (secretSource === "integration") {
     return "Integration-specific";
@@ -137,6 +184,18 @@ export function getSecretSourceLabel(secretSource: IntegrationCard["webhookAuth"
   }
 
   return "None";
+}
+
+export function getSecretStateLabel(integration: IntegrationCard) {
+  if (integration.webhookAuth.secretSource === "integration") {
+    return "Integration-specific secret configured";
+  }
+
+  if (integration.webhookAuth.secretSource === "environment") {
+    return "Using environment fallback secret";
+  }
+
+  return "No secret configured";
 }
 
 export function getSecretStateDescription(integration: IntegrationCard) {
@@ -187,6 +246,48 @@ export function getIntegrationSetupSteps(integration: IntegrationCard) {
   ];
 }
 
+export function getIntegrationSetupDescription(integration: IntegrationCard) {
+  if (integration.provider === "ringba") {
+    return "Configure Ringba to send signed webhook payloads to the DependableQA endpoint above. Use the signature header and prefix exactly as shown. After saving your provider settings, send a test event to verify delivery.";
+  }
+
+  if (integration.provider === "trackdrive") {
+    return "Configure TrackDrive to send a JSON POST webhook to the DependableQA endpoint above. If request signing is enabled, use the configured signature header and prefix. Send a test event after setup to confirm delivery.";
+  }
+
+  if (integration.provider === "retreaver") {
+    return "Configure Retreaver to send webhook events or exports into DependableQA. When using signed requests, match the header and prefix exactly. Verify the first event appears in diagnostics.";
+  }
+
+  return "Use these values in your provider to send webhook events to DependableQA.";
+}
+
+export function getIntegrationSetupHeading(integration: IntegrationCard) {
+  return `${getIntegrationProviderLabel(integration.provider)} setup`;
+}
+
+export function getIntegrationLatestEventText(integration: IntegrationCard) {
+  const health = getIntegrationHealth(integration);
+
+  if (integration.lastEventMessage) {
+    return integration.lastEventMessage;
+  }
+
+  if (health.state === "needs-configuration") {
+    return "Webhook security is not fully configured yet.";
+  }
+
+  if (health.state === "awaiting-first-event") {
+    return "Configuration saved. Waiting for the first provider event.";
+  }
+
+  if (health.state === "error") {
+    return "Recent integration events failed. Review diagnostics below.";
+  }
+
+  return "No webhook events have been recorded yet for this integration.";
+}
+
 export function getDiagnosticsSummary(integration: IntegrationCard) {
   let successCount = 0;
   let errorCount = 0;
@@ -212,4 +313,18 @@ export function getDiagnosticsSummary(integration: IntegrationCard) {
     errorCount,
     lastReceivedAt: integration.recentEvents[0]?.createdAt ?? null,
   };
+}
+
+export function getDiagnosticsSummaryLine(integration: IntegrationCard) {
+  const health = getIntegrationHealth(integration);
+
+  if (integration.recentEvents.length === 0) {
+    return "No webhook events have been recorded yet for this integration.";
+  }
+
+  if (health.state === "healthy" || health.state === "awaiting-first-event") {
+    return "Recent webhook events are processing successfully.";
+  }
+
+  return "Recent webhook events need attention. Review the latest messages below.";
 }
