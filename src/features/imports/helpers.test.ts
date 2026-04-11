@@ -136,8 +136,18 @@ describe("imports helpers", () => {
         batchId: "batch_1",
       })
     ).toEqual({
-      message: "The file uploaded, but batch processing could not be started. Open the batch list and try again.",
+      message: "The file uploaded, but batch processing could not be started. Open the recent batches list and retry if needed.",
       batchId: "batch_1",
+    });
+
+    expect(
+      normalizeImportUploadError({
+        message: "Unable to create import batch.",
+        stage: "creating-batch",
+      })
+    ).toEqual({
+      message: "The file uploaded, but we couldn't create an import batch.",
+      batchId: null,
     });
   });
 
@@ -152,5 +162,6 @@ describe("imports helpers", () => {
     expect(normalizeImportDispatchError("Retry dispatch is only available for uploaded, failed, or partial batches.")).toBe(
       "Retry dispatch is available only for uploaded, failed, or partial batches."
     );
+    expect(normalizeImportDispatchError("Unauthorized")).toBe("Your session expired. Refresh the page and try again.");
   });
 });

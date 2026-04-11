@@ -22,7 +22,6 @@ const primaryNav = [
 const secondaryNav = [
   { label: 'Billing', href: '/app/billing', icon: '💳' },
   { label: 'Settings', href: '/app/settings/profile', icon: '⚙️' },
-  { label: 'Ask AI', href: '/app/ai', icon: '✨' },
   { label: 'Updates', href: '/app/updates', icon: '🔔' },
 ];
 

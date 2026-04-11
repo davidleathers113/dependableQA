@@ -3,28 +3,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ImportDropzone } from "./ImportDropzone";
 
 describe("ImportDropzone", () => {
-  it("renders drag-over copy and staged upload progress", () => {
+  it("renders compact upload copy and staged upload progress", () => {
     const html = renderToStaticMarkup(
       <ImportDropzone
-        isDragging={true}
-        isUploading={true}
-        uploadPhaseLabel="Dispatching import..."
+        uploadPhase="dispatching"
         onFileSelect={() => undefined}
-        onDragEnter={() => undefined}
-        onDragOver={() => undefined}
-        onDragLeave={() => undefined}
-        onDrop={() => undefined}
-        providerSelector={<div>Provider selector</div>}
-        providerHelp={<div>Provider help</div>}
-        error={null}
-        warning={<div>Duplicate warning</div>}
-        success={null}
+        disabled={true}
       />
     );
 
-    expect(html.includes("Drop CSV to upload")).toBe(true);
     expect(html.includes("Dispatching import...")).toBe(true);
-    expect(html.includes("Duplicate filenames may fail")).toBe(true);
-    expect(html.includes("Duplicate warning")).toBe(true);
+    expect(html.includes("validating and processing your file")).toBe(true);
+    expect(html.includes("Browse files")).toBe(true);
   });
 });

@@ -171,7 +171,7 @@ export function getImportUploadPhaseCopy(phase: ImportUploadPhase, hasError = fa
   if (phase === "dispatching") {
     return {
       primary: "Dispatching import...",
-      secondary: "We’re validating and processing your file",
+      secondary: "We're validating and processing your file",
     };
   }
 
@@ -389,7 +389,7 @@ export function normalizeImportDispatchError(message: string) {
   const normalized = message.trim().toLowerCase();
 
   if (normalized.includes("unauthorized")) {
-    return "Your session expired. Refresh and try again.";
+    return "Your session expired. Refresh the page and try again.";
   }
 
   if (normalized.includes("already processing")) {
@@ -431,20 +431,27 @@ export function normalizeImportUploadError(input: {
 
   if (normalized.includes("unauthorized") || normalized.includes("session expired")) {
     return {
-      message: "Your session expired. Refresh and try again.",
+      message: "Your session expired. Refresh the page and try again.",
+      batchId: null,
+    };
+  }
+
+  if (input.stage === "creating-batch") {
+    return {
+      message: "The file uploaded, but we couldn't create an import batch.",
       batchId: null,
     };
   }
 
   if (input.stage === "dispatching" || input.batchId) {
     return {
-      message: "The file uploaded, but batch processing could not be started. Open the batch list and try again.",
+      message: "The file uploaded, but batch processing could not be started. Open the recent batches list and retry if needed.",
       batchId: input.batchId ?? null,
     };
   }
 
   return {
-    message: "We couldn't upload this file. Please try again.",
+    message: "We couldn't upload that file. Please try again.",
     batchId: null,
   };
 }

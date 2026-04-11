@@ -68,13 +68,19 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
       }
 
       setUploadPhase("creating-batch");
-      batchId = await createImportBatchRecord(supabase, {
-        organizationId,
-        userId,
-        fileName: file.name,
-        storagePath,
-        sourceProvider,
-      });
+      try {
+        batchId = await createImportBatchRecord(supabase, {
+          organizationId,
+          userId,
+          fileName: file.name,
+          storagePath,
+          sourceProvider,
+        });
+      } catch (error) {
+        const createBatchError = error as Error & { stage?: ImportUploadPhase | null };
+        createBatchError.stage = "creating-batch";
+        throw createBatchError;
+      }
 
       setCreatedBatchId(batchId);
       setUploadPhase("dispatching");
