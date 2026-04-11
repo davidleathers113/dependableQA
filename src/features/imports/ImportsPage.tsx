@@ -14,6 +14,7 @@ import { dispatchImportBatchRequest } from "./api";
 import { NewImportCard } from "./components/NewImportCard";
 import { RecentImportsCard } from "./components/RecentImportsCard";
 import {
+  detectImportProvider,
   findDuplicateImportBatch,
   hasActiveImportBatches,
   isCsvFile,
@@ -38,6 +39,7 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
   const [errorState, setErrorState] = React.useState<ImportUploadErrorState | null>(null);
   const [createdBatchId, setCreatedBatchId] = React.useState<string | null>(null);
   const [duplicateWarning, setDuplicateWarning] = React.useState("");
+  const [pendingFile, setPendingFile] = React.useState<File | null>(null);
   const [retryingBatchId, setRetryingBatchId] = React.useState<string | null>(null);
   const [retryNotice, setRetryNotice] = React.useState<{ tone: "success" | "warning" | "error"; message: string } | null>(null);
 
@@ -99,6 +101,7 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
       setErrorState(null);
       setCreatedBatchId(null);
       setRetryNotice(null);
+      setPendingFile(null);
     },
     onSuccess: async (batchId) => {
       setErrorState(null);
@@ -158,29 +161,67 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
 
   const handleFile = React.useCallback(
     (file: File) => {
-      setUploadPhase("validating");
-      if (!isCsvFile(file)) {
-        setDuplicateWarning("");
-        setErrorState({
-          message: "Only CSV files can be uploaded here.",
-          batchId: null,
-        });
-        setUploadPhase("error");
-        return;
-      }
+      const startUpload = (sourceProvider: IntegrationProvider) => {
+        setErrorState(null);
+        setRetryNotice(null);
+        uploadMutation.mutate({ file, sourceProvider });
+      };
 
-      const duplicateBatch = findDuplicateImportBatch(importsQuery.data.batches, file.name);
-      setDuplicateWarning(
-        duplicateBatch
-          ? `A batch named ${duplicateBatch.filename} already exists in recent imports. You can still continue if this is a new export.`
-          : ""
-      );
-      setErrorState(null);
-      setRetryNotice(null);
-      uploadMutation.mutate({ file, sourceProvider: mode === "manual" ? provider : "custom" });
+      const detectAndUpload = async () => {
+        setUploadPhase("validating");
+
+        if (!isCsvFile(file)) {
+          setDuplicateWarning("");
+          setErrorState({
+            message: "Only CSV files can be uploaded here.",
+            batchId: null,
+          });
+          setUploadPhase("error");
+          return;
+        }
+
+        const duplicateBatch = findDuplicateImportBatch(importsQuery.data.batches, file.name);
+        setDuplicateWarning(
+          duplicateBatch
+            ? `A batch named ${duplicateBatch.filename} already exists in recent imports. You can still continue if this is a new export.`
+            : ""
+        );
+
+        if (mode === "manual") {
+          startUpload(provider);
+          return;
+        }
+
+        const csvPreview = await file.slice(0, 65536).text();
+        const detection = detectImportProvider(file.name, csvPreview);
+
+        if (detection.provider) {
+          setProvider(detection.provider);
+          startUpload(detection.provider);
+          return;
+        }
+
+        if (detection.suggestedProvider) {
+          setProvider(detection.suggestedProvider);
+        }
+
+        setPendingFile(file);
+        setMode("manual");
+        setUploadPhase("idle");
+      };
+
+      void detectAndUpload();
     },
     [importsQuery.data.batches, mode, provider, uploadMutation]
   );
+
+  const continuePendingFile = React.useCallback(() => {
+    if (!pendingFile) {
+      return;
+    }
+
+    uploadMutation.mutate({ file: pendingFile, sourceProvider: provider });
+  }, [pendingFile, provider, uploadMutation]);
 
   const retryNoticeBanner = retryNotice ? (
     <div
@@ -212,9 +253,17 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
         errorState={errorState}
         successMessage={successMessage}
         duplicateWarning={duplicateWarning}
-        onModeChange={setMode}
+        pendingFileName={pendingFile?.name ?? ""}
+        onModeChange={(nextMode) => {
+          setMode(nextMode);
+          if (nextMode === "auto") {
+            setPendingFile(null);
+            setUploadPhase("idle");
+          }
+        }}
         onProviderChange={setProvider}
         onFileSelected={handleFile}
+        onContinuePendingFile={continuePendingFile}
       />
 
       <RecentImportsCard

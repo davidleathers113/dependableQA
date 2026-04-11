@@ -34,6 +34,13 @@ export interface ImportProviderLink {
   href: string;
 }
 
+export interface ImportProviderDetectionResult {
+  provider: IntegrationProvider | null;
+  suggestedProvider: IntegrationProvider | null;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+}
+
 export const IMPORT_PROVIDER_OPTIONS: Array<{ value: IntegrationProvider; label: string }> = [
   { value: "custom", label: "Custom" },
   { value: "trackdrive", label: "TrackDrive" },
@@ -132,6 +139,182 @@ export function getImportProviderLinks(mode: ImportMode, provider: IntegrationPr
   ];
 }
 
+function normalizeImportCsvHeader(value: string) {
+  return value.trim().toLowerCase().split(" ").join("_").split("-").join("_");
+}
+
+function parseImportCsvLine(text: string) {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text[index];
+    const next = index + 1 < text.length ? text[index + 1] : "";
+
+    if (character === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        index += 2;
+        continue;
+      }
+
+      inQuotes = !inQuotes;
+      index += 1;
+      continue;
+    }
+
+    if (character === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+      index += 1;
+      continue;
+    }
+
+    if ((character === "\n" || character === "\r") && !inQuotes) {
+      break;
+    }
+
+    current += character;
+    index += 1;
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+export function getImportCsvHeaders(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  return parseImportCsvLine(trimmed).map((header) => normalizeImportCsvHeader(header)).filter((header) => header.length > 0);
+}
+
+function getProviderDetectionScore(headers: Set<string>, markers: string[]) {
+  let score = 0;
+
+  for (const marker of markers) {
+    if (headers.has(marker)) {
+      score += 1;
+    }
+  }
+
+  return score;
+}
+
+export function detectImportProvider(fileName: string, csvText: string): ImportProviderDetectionResult {
+  const normalizedFileName = fileName.trim().toLowerCase();
+  const headers = new Set(getImportCsvHeaders(csvText));
+  const scores: Record<IntegrationProvider, number> = {
+    custom: 0,
+    trackdrive: 0,
+    ringba: 0,
+    retreaver: 0,
+  };
+
+  if (normalizedFileName.includes("trackdrive")) {
+    scores.trackdrive += 5;
+  }
+
+  if (normalizedFileName.includes("ringba")) {
+    scores.ringba += 5;
+  }
+
+  if (normalizedFileName.includes("retreaver")) {
+    scores.retreaver += 5;
+  }
+
+  if (normalizedFileName.includes("custom")) {
+    scores.custom += 2;
+  }
+
+  scores.trackdrive += getProviderDetectionScore(headers, [
+    "affiliate_id",
+    "affiliate_name",
+    "affiliate_sub_id",
+    "buyer_name",
+    "tracking_number",
+    "recording_url",
+  ]);
+
+  scores.ringba += getProviderDetectionScore(headers, [
+    "inbound_call_id",
+    "ring_tree_name",
+    "target_name",
+    "publisher_id",
+    "buyer_id",
+    "call_length_in_seconds",
+    "connected_call_length_in_seconds",
+  ]);
+
+  scores.retreaver += getProviderDetectionScore(headers, [
+    "call_uuid",
+    "number_name",
+    "dialed_number",
+    "source_id",
+    "source_name",
+    "conversion_seconds",
+    "retreaver_number_id",
+  ]);
+
+  scores.custom += getProviderDetectionScore(headers, [
+    "caller_number",
+    "started_at",
+    "campaign_name",
+    "publisher_name",
+    "transcript_text",
+  ]);
+
+  const rankedProviders = (Object.entries(scores) as Array<[IntegrationProvider, number]>).sort((left, right) => {
+    if (right[1] !== left[1]) {
+      return right[1] - left[1];
+    }
+
+    return left[0].localeCompare(right[0]);
+  });
+
+  const topProvider = rankedProviders[0]?.[0] ?? null;
+  const topScore = rankedProviders[0]?.[1] ?? 0;
+  const secondScore = rankedProviders[1]?.[1] ?? 0;
+
+  if (!topProvider || topScore === 0) {
+    return {
+      provider: null,
+      suggestedProvider: null,
+      confidence: "low",
+      reason: "No provider-specific filename or header signals were found.",
+    };
+  }
+
+  if (topScore >= 5 || (topScore >= 3 && topScore - secondScore >= 2)) {
+    return {
+      provider: topProvider,
+      suggestedProvider: topProvider,
+      confidence: topScore >= 5 ? "high" : "medium",
+      reason: `Detected ${getImportProviderLabel(topProvider)} from filename and header matches.`,
+    };
+  }
+
+  if (topProvider === "custom" && topScore >= 2 && secondScore === 0) {
+    return {
+      provider: topProvider,
+      suggestedProvider: topProvider,
+      confidence: "medium",
+      reason: "Detected the normalized custom template headers.",
+    };
+  }
+
+  return {
+    provider: null,
+    suggestedProvider: topProvider,
+    confidence: "low",
+    reason: "The file looks importable, but the provider format is not confident enough to auto-select.",
+  };
+}
+
 export function getImportUploadPhaseCopy(phase: ImportUploadPhase, hasError = false) {
   if (hasError || phase === "error") {
     return {
@@ -150,7 +333,7 @@ export function getImportUploadPhaseCopy(phase: ImportUploadPhase, hasError = fa
   if (phase === "validating") {
     return {
       primary: "Checking file...",
-      secondary: "Validating your CSV before upload starts",
+      secondary: "Validating your CSV and detecting the provider format",
     };
   }
 

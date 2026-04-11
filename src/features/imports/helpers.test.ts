@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ImportBatchSummary } from "../../lib/app-data";
 import {
   canRetryImportBatch,
+  detectImportProvider,
   deriveImportSummarySnapshot,
   filterImportBatches,
   findDuplicateImportBatch,
@@ -78,6 +79,38 @@ describe("imports helpers", () => {
     expect(hasActiveImportBatches(SAMPLE_BATCHES)).toBe(true);
     expect(isCsvFile({ name: "calls.csv", type: "" } as File)).toBe(true);
     expect(isCsvFile({ name: "calls.txt", type: "text/plain" } as File)).toBe(false);
+  });
+
+  it("auto-detects provider formats from filename and headers", () => {
+    expect(
+      detectImportProvider(
+        "trackdrive-report.csv",
+        "affiliate_sub_id,buyer_name,caller_number,started_at\nsub-1,Buyer,+1555,2026-04-10T10:00:00Z"
+      )
+    ).toMatchObject({
+      provider: "trackdrive",
+      suggestedProvider: "trackdrive",
+    });
+
+    expect(
+      detectImportProvider(
+        "normalized-export.csv",
+        "caller_number,started_at,campaign_name,publisher_name\n+1555,2026-04-10T10:00:00Z,Campaign,Publisher"
+      )
+    ).toMatchObject({
+      provider: "custom",
+      suggestedProvider: "custom",
+    });
+
+    expect(
+      detectImportProvider(
+        "mystery.csv",
+        "caller,created_at,duration\n+1555,2026-04-10T10:00:00Z,30"
+      )
+    ).toMatchObject({
+      provider: null,
+      confidence: "low",
+    });
   });
 
   it("derives import summary cards from recent batches", () => {

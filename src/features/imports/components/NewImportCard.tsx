@@ -14,9 +14,11 @@ interface Props {
   errorState: ImportUploadErrorState | null;
   successMessage: string;
   duplicateWarning: string;
+  pendingFileName: string;
   onModeChange: (mode: ImportMode) => void;
   onProviderChange: (provider: IntegrationProvider) => void;
   onFileSelected: (file: File) => void;
+  onContinuePendingFile: () => void;
 }
 
 export function NewImportCard({
@@ -26,9 +28,11 @@ export function NewImportCard({
   errorState,
   successMessage,
   duplicateWarning,
+  pendingFileName,
   onModeChange,
   onProviderChange,
   onFileSelected,
+  onContinuePendingFile,
 }: Props) {
   const [isGuideOpen, setIsGuideOpen] = React.useState(false);
   const isUploading =
@@ -66,11 +70,29 @@ export function NewImportCard({
         ) : null}
 
         {mode === "manual" ? (
-          <ImportProviderSelector
-            provider={selectedProvider}
-            onChange={onProviderChange}
-            disabled={isUploading}
-          />
+          <div className="space-y-3">
+            <ImportProviderSelector
+              provider={selectedProvider}
+              onChange={onProviderChange}
+              disabled={isUploading}
+            />
+            {pendingFileName ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                <p className="text-sm font-semibold text-amber-100">
+                  We couldn't confidently detect the provider format. Choose one manually to continue.
+                </p>
+                <p className="mt-1 text-sm text-amber-200/90">{pendingFileName}</p>
+                <button
+                  type="button"
+                  onClick={onContinuePendingFile}
+                  disabled={isUploading}
+                  className="mt-3 inline-flex rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Continue import
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         <ImportDropzone uploadPhase={uploadPhase} disabled={isUploading} onFileSelect={onFileSelected} />
