@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import { getImportBatchDetail, type ImportBatchDetail } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
+import { dispatchImportBatchRequest } from "./api";
+import { canRetryImportBatch, getImportRetryHelper, normalizeImportDispatchError } from "./helpers";
 
 interface Props {
   organizationId: string;
@@ -26,6 +28,7 @@ function formatDateTime(value: string | null) {
 function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Props) {
   const queryClient = useQueryClient();
   const [errorMessage, setErrorMessage] = React.useState("");
+  const [successMessage, setSuccessMessage] = React.useState("");
   const batchQuery = useQuery({
     queryKey: ["import-batch", organizationId, batchId],
     queryFn: () => getImportBatchDetail(getBrowserSupabase(), organizationId, batchId),
@@ -34,28 +37,26 @@ function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Pr
 
   const dispatchMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch("/api/imports/dispatch", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ batchId }),
-      });
-
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Unable to dispatch import batch.");
-      }
+      return dispatchImportBatchRequest(batchId);
     },
-    onSuccess: async () => {
+    onMutate: () => {
       setErrorMessage("");
+      setSuccessMessage("");
+    },
+    onSuccess: async (result) => {
+      setSuccessMessage(
+        result.rejectedCount > 0
+          ? `Retry finished. Accepted ${result.acceptedCount} rows and rejected ${result.rejectedCount}.`
+          : `Retry finished. Accepted ${result.acceptedCount} rows with no rejections.`
+      );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["import-batch", organizationId, batchId] }),
         queryClient.invalidateQueries({ queryKey: ["imports", organizationId] }),
       ]);
     },
     onError: (error) => {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to re-run import.");
+      setSuccessMessage("");
+      setErrorMessage(normalizeImportDispatchError(error instanceof Error ? error.message : "Unable to re-run import."));
     },
   });
 
@@ -73,25 +74,35 @@ function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Pr
     );
   }
 
+  const canRetry = canRetryImportBatch(batch.status);
+
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <a href="/app/imports" className="text-sm text-violet-400 hover:text-violet-300">
           Back to imports
         </a>
-        <button
-          type="button"
-          onClick={() => dispatchMutation.mutate()}
-          disabled={dispatchMutation.isPending}
-          className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-60"
-        >
-          {dispatchMutation.isPending ? "Dispatching..." : "Re-run Dispatch"}
-        </button>
+        {canRetry ? (
+          <button
+            type="button"
+            onClick={() => dispatchMutation.mutate()}
+            disabled={dispatchMutation.isPending}
+            className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-60"
+          >
+            {dispatchMutation.isPending ? "Dispatching..." : "Re-run Dispatch"}
+          </button>
+        ) : null}
       </div>
 
       {errorMessage && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {errorMessage}
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {successMessage}
         </div>
       )}
 
@@ -117,6 +128,9 @@ function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Pr
         </div>
         <div className="mt-4 text-sm text-slate-400">
           Created {formatDateTime(batch.createdAt)}. Processing window: {formatDateTime(batch.startedAt)} to {formatDateTime(batch.completedAt)}.
+        </div>
+        <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-400">
+          {getImportRetryHelper(batch.status)}
         </div>
       </header>
 

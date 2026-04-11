@@ -5,7 +5,7 @@ import { createHmacSha256Hex, getHeaderValue, safeEqualText } from "./netlify-re
 
 type SupabaseAny = SupabaseClient<Database>;
 
-interface IntegrationContext {
+export interface IntegrationContext {
   id: string;
   organizationId: string;
   provider: IntegrationProvider;
@@ -13,7 +13,7 @@ interface IntegrationContext {
   config: Json;
 }
 
-interface WebhookAuthConfig {
+export interface WebhookAuthConfig {
   type: "shared-secret" | "hmac-sha256";
   secret: string;
   headerName: string;
@@ -254,7 +254,7 @@ export function getWebhookAuthConfig(integration: IntegrationContext) {
   return resolveWebhookAuthConfig(integration.config);
 }
 
-async function recordIntegrationEvent(
+export async function recordIntegrationEvent(
   client: SupabaseAny,
   integration: IntegrationContext,
   options: {
@@ -284,7 +284,7 @@ async function recordIntegrationEvent(
   return asString((insert.data as Record<string, unknown>).id);
 }
 
-async function updateIntegrationStatus(
+export async function updateIntegrationStatus(
   client: SupabaseAny,
   integration: IntegrationContext,
   update: Database["public"]["Tables"]["integrations"]["Update"]

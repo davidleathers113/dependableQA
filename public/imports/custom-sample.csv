@@ -1,0 +1,2 @@
+caller_number,destination_number,started_at,ended_at,duration_seconds,external_call_id,campaign_name,publisher_name,current_disposition,transcript_text
++15551234567,+18005550123,2026-04-10T18:33:00.000Z,2026-04-10T18:42:30.000Z,570,td-call-1001,Spring Home Services,Northwest Media,Qualified,"Caller asked about pricing and booked a same-day follow-up."

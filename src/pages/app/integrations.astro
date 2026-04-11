@@ -6,10 +6,11 @@ import { getIntegrationsSummary } from '../../lib/app-data';
 import { requireAppSession } from '../../lib/auth/require-app-session';
 
 const session = await requireAppSession(Astro);
+const env = typeof process !== "undefined" ? process.env : {};
 const initialData = await getIntegrationsSummary(Astro.locals.supabase, session.organization.id, {
-  fallbackSecretConfigured: Boolean(import.meta.env.INTEGRATION_INGEST_SHARED_SECRET),
-  fallbackHeaderName: import.meta.env.INTEGRATION_INGEST_SIGNATURE_HEADER,
-  fallbackPrefix: import.meta.env.INTEGRATION_INGEST_SIGNATURE_PREFIX,
+  fallbackSecretConfigured: Boolean(env.INTEGRATION_INGEST_SHARED_SECRET),
+  fallbackHeaderName: env.INTEGRATION_INGEST_SIGNATURE_HEADER,
+  fallbackPrefix: env.INTEGRATION_INGEST_SIGNATURE_PREFIX,
 });
 ---
 

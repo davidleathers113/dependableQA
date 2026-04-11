@@ -6,11 +6,13 @@ const {
   insertAuditLog,
   requireApiSession,
   getAdminSupabase,
+  sendIntegrationTestEvent,
 } = vi.hoisted(() => ({
   getIntegrationsSummary: vi.fn(),
   insertAuditLog: vi.fn(),
   requireApiSession: vi.fn(),
   getAdminSupabase: vi.fn(),
+  sendIntegrationTestEvent: vi.fn(),
 }));
 
 vi.mock("../../src/lib/app-data", () => ({
@@ -24,6 +26,10 @@ vi.mock("../../src/lib/auth/request-session", () => ({
 
 vi.mock("../../src/lib/supabase/admin-client", () => ({
   getAdminSupabase,
+}));
+
+vi.mock("../../src/server/integration-test-event", () => ({
+  sendIntegrationTestEvent,
 }));
 
 import { GET, POST } from "../../src/pages/api/settings/integrations";
@@ -78,6 +84,7 @@ describe("/api/settings/integrations", () => {
     insertAuditLog.mockReset();
     requireApiSession.mockReset();
     getAdminSupabase.mockReset();
+    sendIntegrationTestEvent.mockReset();
   });
 
   it("returns 401 for unauthenticated GET requests", async () => {
@@ -136,6 +143,8 @@ describe("/api/settings/integrations", () => {
       user: { id: "user_1" },
       organization: { id: "org_1", role: "owner" },
     });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
 
     const response = await POST(createApiContext({
       request: new Request("http://localhost/api/settings/integrations", {
@@ -152,7 +161,7 @@ describe("/api/settings/integrations", () => {
     }));
 
     expect(response.status).toBe(400);
-    expect(getAdminSupabase).not.toHaveBeenCalled();
+    expect(getAdminSupabase).toHaveBeenCalled();
   });
 
   it("updates the canonical webhook auth config and writes an audit log", async () => {
@@ -210,5 +219,98 @@ describe("/api/settings/integrations", () => {
       action: "integration.config.updated",
       entityId: "integration_1",
     }));
+  });
+
+  it("returns 403 when a non-admin tries to send a test event", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "reviewer" },
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "send-test-event",
+          integrationId: "integration_1",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(403);
+  });
+
+  it("returns refreshed integration data after a successful test event", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    sendIntegrationTestEvent.mockResolvedValue({
+      ok: true,
+      message: "Test event accepted.",
+    });
+    getIntegrationsSummary.mockResolvedValue({
+      integrations: [
+        {
+          id: "integration_1",
+          displayName: "Primary Integration",
+          provider: "ringba",
+          status: "connected",
+          mode: "live",
+          lastSuccessAt: "2026-04-10T00:00:00.000Z",
+          lastErrorAt: null,
+          lastEventMessage: "Test event accepted.",
+          lastEventSeverity: "info",
+          webhookAuth: {
+            authType: "hmac-sha256",
+            headerName: "x-dependableqa-signature",
+            prefix: "sha256=",
+            secretConfigured: true,
+            secretSource: "integration",
+          },
+          recentEvents: [],
+        },
+      ],
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "send-test-event",
+          integrationId: "integration_1",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(sendIntegrationTestEvent).toHaveBeenCalledWith(client, "integration_1");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      message: "Test event accepted.",
+      integration: {
+        id: "integration_1",
+        displayName: "Primary Integration",
+        provider: "ringba",
+        status: "connected",
+        mode: "live",
+        lastSuccessAt: "2026-04-10T00:00:00.000Z",
+        lastErrorAt: null,
+        lastEventMessage: "Test event accepted.",
+        lastEventSeverity: "info",
+        webhookAuth: {
+          authType: "hmac-sha256",
+          headerName: "x-dependableqa-signature",
+          prefix: "sha256=",
+          secretConfigured: true,
+          secretSource: "integration",
+        },
+        recentEvents: [],
+      },
+    });
   });
 });

@@ -7,11 +7,12 @@ export function getActiveOrganizationId(cookies: AstroCookies) {
 }
 
 export function setActiveOrganizationId(cookies: AstroCookies, organizationId: string) {
+  const isProduction = typeof process !== "undefined" && process.env.NODE_ENV === "production";
   cookies.set(ACTIVE_ORGANIZATION_COOKIE, organizationId, {
     path: "/",
     httpOnly: true,
     sameSite: "lax",
-    secure: import.meta.env.PROD,
+    secure: isProduction,
     maxAge: 60 * 60 * 24 * 30,
   });
 }

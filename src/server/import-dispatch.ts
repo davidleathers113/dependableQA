@@ -133,13 +133,18 @@ async function markImportBatchFailed(
   });
 }
 
+function canDispatchExistingBatch(status: string) {
+  const normalized = status.trim().toLowerCase();
+  return normalized === "uploaded" || normalized === "failed" || normalized === "partial";
+}
+
 export async function dispatchImportBatch(
   client: SupabaseAny,
   options: { organizationId: string; batchId: string; actorUserId: string | null }
 ) {
   const batchResult = await client
     .from("import_batches")
-    .select("id, filename, storage_path, source_provider")
+    .select("id, filename, storage_path, source_provider, status")
     .eq("organization_id", options.organizationId)
     .eq("id", options.batchId)
     .single();
@@ -149,13 +154,36 @@ export async function dispatchImportBatch(
   }
 
   const batch = batchResult.data;
+  const currentStatus = asString(batch.status);
+
+  if (currentStatus.trim().toLowerCase() === "processing") {
+    throw new Error("This batch is already processing. Wait for it to finish before retrying dispatch.");
+  }
+
+  if (!canDispatchExistingBatch(currentStatus)) {
+    throw new Error("Retry dispatch is only available for uploaded, failed, or partial batches.");
+  }
 
   try {
+    const clearErrorsResult = await client
+      .from("import_row_errors")
+      .delete()
+      .eq("organization_id", options.organizationId)
+      .eq("import_batch_id", options.batchId);
+
+    if (clearErrorsResult.error) {
+      throw new Error(clearErrorsResult.error.message);
+    }
+
     const startResult = await client
       .from("import_batches")
       .update({
         status: "processing",
         started_at: new Date().toISOString(),
+        completed_at: null,
+        row_count_total: 0,
+        row_count_accepted: 0,
+        row_count_rejected: 0,
       })
       .eq("id", options.batchId)
       .eq("organization_id", options.organizationId);

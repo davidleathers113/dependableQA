@@ -26,6 +26,7 @@ function toFundingAmountCents(value: string | null, fallbackAmountCents: number)
 }
 
 export const GET: APIRoute = async (context) => {
+  const env = typeof process !== "undefined" ? process.env : {};
   const session = await requireApiSession(context);
   if (!session) {
     return new Response("Unauthorized", { status: 401 });
@@ -35,7 +36,7 @@ export const GET: APIRoute = async (context) => {
     return new Response("Only owners, admins, and billing users can manage billing.", { status: 403 });
   }
 
-  const secretKey = import.meta.env.STRIPE_SECRET_KEY;
+  const secretKey = env.STRIPE_SECRET_KEY;
   if (!secretKey) {
     return new Response("Missing Stripe secret key", { status: 500 });
   }

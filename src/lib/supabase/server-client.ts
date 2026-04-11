@@ -12,10 +12,11 @@ function getRequestCookies(request: Request) {
 }
 
 export const createServerSupabaseClient = (request: Request, cookies: AstroCookies) => {
+  const env = typeof process !== "undefined" ? process.env : {};
   const config = requirePublicSupabaseConfig({
-    url: import.meta.env.SUPABASE_URL,
-    fallbackUrl: import.meta.env.SUPABASE_DATABASE_URL,
-    anonKey: import.meta.env.SUPABASE_ANON_KEY,
+    url: env.SUPABASE_URL,
+    fallbackUrl: env.SUPABASE_DATABASE_URL,
+    anonKey: env.SUPABASE_ANON_KEY,
   })
 
   return createServerClient<Database>(

@@ -163,6 +163,8 @@ export interface ImportBatchSummary {
   rowCountRejected: number;
   createdAt: string;
   sourceProvider: IntegrationProvider;
+  uploadedById: string | null;
+  uploadedByName: string | null;
 }
 
 export interface ImportBatchDetail extends ImportBatchSummary {
@@ -983,6 +985,27 @@ function getDisplayName(profile: Record<string, unknown> | null) {
   return asNullableString(profile.email);
 }
 
+async function getProfileDisplayNamesById(client: SupabaseAny, userIds: string[]) {
+  const uniqueUserIds = Array.from(new Set(userIds.filter((userId) => userId.length > 0)));
+  if (uniqueUserIds.length === 0) {
+    return new Map<string, string | null>();
+  }
+
+  const profilesResult = await client.from("profiles").select("id, first_name, last_name, email").in("id", uniqueUserIds);
+
+  assertNoError(profilesResult.error, "Unable to load profile names.");
+
+  const displayNames = new Map<string, string | null>();
+  for (const row of (profilesResult.data ?? []) as Array<Record<string, unknown>>) {
+    const id = asString(row.id);
+    if (id) {
+      displayNames.set(id, getDisplayName(row));
+    }
+  }
+
+  return displayNames;
+}
+
 async function getCallTopFlags(
   client: SupabaseAny,
   organizationId: string,
@@ -1749,24 +1772,36 @@ export async function getOverviewData(client: SupabaseAny, organizationId: strin
 export async function getImportsPageData(client: SupabaseAny, organizationId: string): Promise<ImportsPageData> {
   const { data, error } = await client
     .from("import_batches")
-    .select("id, filename, status, row_count_total, row_count_accepted, row_count_rejected, created_at, source_provider")
+    .select("id, filename, status, row_count_total, row_count_accepted, row_count_rejected, created_at, source_provider, uploaded_by")
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false })
     .limit(50);
 
   assertNoError(error, "Unable to load import batches.");
 
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const uploadedByNames = await getProfileDisplayNamesById(
+    client,
+    rows.map((row) => asString(row.uploaded_by))
+  );
+
   return {
-    batches: ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
-      id: asString(row.id),
-      filename: asString(row.filename),
-      status: asString(row.status),
-      rowCountTotal: asNumber(row.row_count_total),
-      rowCountAccepted: asNumber(row.row_count_accepted),
-      rowCountRejected: asNumber(row.row_count_rejected),
-      createdAt: asString(row.created_at),
-      sourceProvider: (asString(row.source_provider) || "custom") as IntegrationProvider,
-    })),
+    batches: rows.map((row) => {
+      const uploadedById = asNullableString(row.uploaded_by);
+
+      return {
+        id: asString(row.id),
+        filename: asString(row.filename),
+        status: asString(row.status),
+        rowCountTotal: asNumber(row.row_count_total),
+        rowCountAccepted: asNumber(row.row_count_accepted),
+        rowCountRejected: asNumber(row.row_count_rejected),
+        createdAt: asString(row.created_at),
+        sourceProvider: (asString(row.source_provider) || "custom") as IntegrationProvider,
+        uploadedById,
+        uploadedByName: uploadedById ? uploadedByNames.get(uploadedById) ?? null : null,
+      };
+    }),
   };
 }
 
@@ -1774,7 +1809,7 @@ export async function getImportBatchDetail(client: SupabaseAny, organizationId: 
   const [batchResult, errorsResult, callsCountResult] = await Promise.all([
     client
       .from("import_batches")
-      .select("id, filename, status, row_count_total, row_count_accepted, row_count_rejected, created_at, source_provider, storage_path, source_kind, started_at, completed_at")
+      .select("id, filename, status, row_count_total, row_count_accepted, row_count_rejected, created_at, source_provider, storage_path, source_kind, started_at, completed_at, uploaded_by")
       .eq("organization_id", organizationId)
       .eq("id", batchId)
       .maybeSingle(),
@@ -1801,6 +1836,9 @@ export async function getImportBatchDetail(client: SupabaseAny, organizationId: 
     return null;
   }
 
+  const uploadedById = asNullableString(batch.uploaded_by);
+  const uploadedByNames = uploadedById ? await getProfileDisplayNamesById(client, [uploadedById]) : new Map<string, string | null>();
+
   return {
     id: asString(batch.id),
     filename: asString(batch.filename),
@@ -1810,6 +1848,8 @@ export async function getImportBatchDetail(client: SupabaseAny, organizationId: 
     rowCountRejected: asNumber(batch.row_count_rejected),
     createdAt: asString(batch.created_at),
     sourceProvider: (asString(batch.source_provider) || "custom") as IntegrationProvider,
+    uploadedById,
+    uploadedByName: uploadedById ? uploadedByNames.get(uploadedById) ?? null : null,
     storagePath: asString(batch.storage_path),
     sourceKind: asString(batch.source_kind),
     startedAt: asNullableString(batch.started_at),
