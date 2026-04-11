@@ -184,11 +184,11 @@ export function getIntegrationLatestStatusLabel(integration: IntegrationCard) {
 
 export function getIntegrationPrimaryActionLabel(integration: IntegrationCard) {
   if (!integration.isConfigured) {
-    return "Configure";
+    return "Connect";
   }
 
   const health = getIntegrationHealth(integration);
-  return health.state === "needs-configuration" ? "Configure" : "Open details";
+  return health.state === "needs-configuration" ? "Configure" : "Reconfigure";
 }
 
 export function getIntegrationSummaryMeta(integration: IntegrationCard): IntegrationSummaryMeta {

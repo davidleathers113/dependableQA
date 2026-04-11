@@ -1,6 +1,15 @@
 import type { ImportBatchSummary, IntegrationProvider } from "../../lib/app-data";
 
-export type ImportUploadPhase = "uploading" | "creating" | "dispatching" | "redirecting";
+export type ImportMode = "auto" | "manual";
+export type ImportUploadPhase =
+  | "idle"
+  | "dragging"
+  | "validating"
+  | "uploading"
+  | "creating-batch"
+  | "dispatching"
+  | "redirecting"
+  | "error";
 
 export interface ImportUploadErrorState {
   message: string;
@@ -20,6 +29,11 @@ export interface ImportSummarySnapshot {
   completedToday: number;
 }
 
+export interface ImportProviderLink {
+  label: string;
+  href: string;
+}
+
 export const IMPORT_PROVIDER_OPTIONS: Array<{ value: IntegrationProvider; label: string }> = [
   { value: "custom", label: "Custom" },
   { value: "trackdrive", label: "TrackDrive" },
@@ -27,9 +41,9 @@ export const IMPORT_PROVIDER_OPTIONS: Array<{ value: IntegrationProvider; label:
   { value: "retreaver", label: "Retreaver" },
 ];
 
-export const IMPORT_UPLOAD_PHASE_LABELS: Record<ImportUploadPhase, string> = {
+export const IMPORT_UPLOAD_PHASE_LABELS: Record<Exclude<ImportUploadPhase, "idle" | "dragging" | "validating" | "error">, string> = {
   uploading: "Uploading file...",
-  creating: "Creating batch...",
+  "creating-batch": "Creating batch...",
   dispatching: "Dispatching import...",
   redirecting: "Opening batch detail...",
 };
@@ -62,6 +76,116 @@ export function getImportProviderHelp(provider: IntegrationProvider) {
   }
 
   return "Use your normalized CSV template. At minimum, rows should include caller number and started time.";
+}
+
+export function getImportProviderHint(mode: ImportMode, provider: IntegrationProvider) {
+  if (mode === "auto") {
+    return {
+      label: "Auto-detect",
+      text: "DependableQA will try to identify TrackDrive, Ringba, and Retreaver exports automatically.",
+    };
+  }
+
+  if (provider === "trackdrive") {
+    return {
+      label: "TrackDrive format",
+      text: "Use an export with caller number, duration, and created time.",
+    };
+  }
+
+  if (provider === "ringba") {
+    return {
+      label: "Ringba format",
+      text: "Use an export with caller number, timestamps, and campaign context.",
+    };
+  }
+
+  if (provider === "retreaver") {
+    return {
+      label: "Retreaver format",
+      text: "Use an export with caller number, call start time, and duration.",
+    };
+  }
+
+  return {
+    label: "Custom format",
+    text: "Include caller number and started time at minimum.",
+  };
+}
+
+export function getImportProviderLinks(mode: ImportMode, provider: IntegrationProvider): ImportProviderLink[] {
+  if (mode === "auto") {
+    return [{ label: "Format guide", href: "#import-format-guide" }];
+  }
+
+  if (provider === "custom") {
+    return [
+      { label: "Template CSV", href: "/imports/custom-template.csv" },
+      { label: "Sample CSV", href: "/imports/custom-sample.csv" },
+      { label: "Format guide", href: "#import-format-guide" },
+    ];
+  }
+
+  return [
+    { label: "Sample CSV", href: "/imports/custom-sample.csv" },
+    { label: "Format guide", href: "#import-format-guide" },
+  ];
+}
+
+export function getImportUploadPhaseCopy(phase: ImportUploadPhase, hasError = false) {
+  if (hasError || phase === "error") {
+    return {
+      primary: "Only CSV files can be uploaded here",
+      secondary: "Choose a .csv export and try again",
+    };
+  }
+
+  if (phase === "dragging") {
+    return {
+      primary: "Drop CSV to upload",
+      secondary: "Release to create a new import batch",
+    };
+  }
+
+  if (phase === "validating") {
+    return {
+      primary: "Checking file...",
+      secondary: "Validating your CSV before upload starts",
+    };
+  }
+
+  if (phase === "uploading") {
+    return {
+      primary: "Uploading file...",
+      secondary: "Please wait while we prepare your batch",
+    };
+  }
+
+  if (phase === "creating-batch") {
+    return {
+      primary: "Creating batch...",
+      secondary: "Setting up the import record for this file",
+    };
+  }
+
+  if (phase === "dispatching") {
+    return {
+      primary: "Dispatching import...",
+      secondary: "We’re validating and processing your file",
+    };
+  }
+
+  if (phase === "redirecting") {
+    return {
+      primary: "Import created",
+      secondary: "Opening batch detail...",
+    };
+  }
+
+  return {
+    primary: "Drop a CSV file here, or browse",
+    secondary: "CSV only · Upload starts immediately",
+  };
 }
 
 export function getImportStatusLabel(status: string) {
@@ -150,6 +274,10 @@ export function formatImportRelativeTime(value: string, now = Date.now()) {
 
   const deltaDays = Math.round(deltaHours / 24);
   return formatter.format(deltaDays, "day");
+}
+
+export function formatRecentImportMeta(batch: ImportBatchSummary) {
+  return `${getImportProviderLabel(batch.sourceProvider)} · ${batch.rowCountAccepted} accepted · ${batch.rowCountRejected} rejected · ${formatImportDateTime(batch.createdAt)}`;
 }
 
 export function hasActiveImportBatches(batches: ImportBatchSummary[]) {

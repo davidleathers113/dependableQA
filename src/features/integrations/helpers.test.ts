@@ -151,13 +151,31 @@ describe("integration helpers", () => {
   it("builds summary metadata for the summary card layer", () => {
     const meta = getIntegrationSummaryMeta(
       createIntegration({
+        webhookAuth: {
+          authType: "hmac-sha256",
+          headerName: "x-dependableqa-signature",
+          prefix: "sha256=",
+          secretConfigured: true,
+          secretSource: "integration",
+        },
         lastSuccessAt: "2026-04-10T00:00:00.000Z",
       })
     );
 
     expect(meta.setupModelDescription).toBe("Webhook ingest with signed provider payloads.");
     expect(meta.latestStatusLabel.startsWith("Last success:")).toBe(true);
-    expect(meta.primaryActionLabel).toBe("Configure");
+    expect(meta.primaryActionLabel).toBe("Reconfigure");
+  });
+
+  it("uses connect as the summary action for placeholders", () => {
+    const meta = getIntegrationSummaryMeta(
+      createIntegration({
+        isConfigured: false,
+        isCatalogPlaceholder: true,
+      })
+    );
+
+    expect(meta.primaryActionLabel).toBe("Connect");
   });
 
   it("shows recent event recorded when timestamps are missing but recent events exist", () => {

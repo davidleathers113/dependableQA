@@ -11,18 +11,13 @@ import {
 } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
 import { dispatchImportBatchRequest } from "./api";
-import { ImportBatchTable } from "./components/ImportBatchTable";
-import { ImportDropzone } from "./components/ImportDropzone";
-import { ImportProviderHelp } from "./components/ImportProviderHelp";
-import { ImportProviderSelector } from "./components/ImportProviderSelector";
-import { ImportSummaryCards } from "./components/ImportSummaryCards";
-import { ImportUploadError } from "./components/ImportUploadError";
+import { NewImportCard } from "./components/NewImportCard";
+import { RecentImportsCard } from "./components/RecentImportsCard";
 import {
-  IMPORT_UPLOAD_PHASE_LABELS,
-  filterImportBatches,
   findDuplicateImportBatch,
   hasActiveImportBatches,
   isCsvFile,
+  type ImportMode,
   normalizeImportDispatchError,
   normalizeImportUploadError,
   type ImportUploadErrorState,
@@ -37,18 +32,14 @@ interface Props {
 
 function ImportsPageInner({ organizationId, userId, initialData }: Props) {
   const queryClient = useQueryClient();
+  const [mode, setMode] = React.useState<ImportMode>("auto");
   const [provider, setProvider] = React.useState<IntegrationProvider>("custom");
-  const [isDragging, setIsDragging] = React.useState(false);
-  const [uploadPhase, setUploadPhase] = React.useState<ImportUploadPhase | null>(null);
+  const [uploadPhase, setUploadPhase] = React.useState<ImportUploadPhase>("idle");
   const [errorState, setErrorState] = React.useState<ImportUploadErrorState | null>(null);
   const [createdBatchId, setCreatedBatchId] = React.useState<string | null>(null);
-  const [search, setSearch] = React.useState("");
-  const [providerFilter, setProviderFilter] = React.useState<"all" | IntegrationProvider>("all");
-  const [statusFilter, setStatusFilter] = React.useState<"all" | string>("all");
   const [duplicateWarning, setDuplicateWarning] = React.useState("");
   const [retryingBatchId, setRetryingBatchId] = React.useState<string | null>(null);
   const [retryNotice, setRetryNotice] = React.useState<{ tone: "success" | "warning" | "error"; message: string } | null>(null);
-  const dragDepthRef = React.useRef(0);
 
   const importsQuery = useQuery({
     queryKey: ["imports", organizationId],
@@ -76,7 +67,7 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
         throw new Error(upload.error.message);
       }
 
-      setUploadPhase("creating");
+      setUploadPhase("creating-batch");
       batchId = await createImportBatchRecord(supabase, {
         organizationId,
         userId,
@@ -114,7 +105,7 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
     },
     onError: (error) => {
       const mutationError = error as Error & { batchId?: string | null; stage?: ImportUploadPhase | null };
-      setUploadPhase(null);
+      setUploadPhase("error");
       setErrorState(
         normalizeImportUploadError({
           message: error instanceof Error ? error.message : "Unable to upload file.",
@@ -159,24 +150,16 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
     },
   });
 
-  const filteredBatches = React.useMemo(
-    () =>
-      filterImportBatches(importsQuery.data.batches, {
-        search,
-        provider: providerFilter,
-        status: statusFilter,
-      }),
-    [importsQuery.data.batches, providerFilter, search, statusFilter]
-  );
-
   const handleFile = React.useCallback(
     (file: File) => {
+      setUploadPhase("validating");
       if (!isCsvFile(file)) {
         setDuplicateWarning("");
         setErrorState({
           message: "Only CSV files can be uploaded here.",
           batchId: null,
         });
+        setUploadPhase("error");
         return;
       }
 
@@ -188,76 +171,10 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
       );
       setErrorState(null);
       setRetryNotice(null);
-      uploadMutation.mutate({ file, sourceProvider: provider });
+      uploadMutation.mutate({ file, sourceProvider: mode === "manual" ? provider : "custom" });
     },
-    [importsQuery.data.batches, provider, uploadMutation]
+    [importsQuery.data.batches, mode, provider, uploadMutation]
   );
-
-  const handleDragEnter = React.useCallback<React.DragEventHandler<HTMLDivElement>>(
-    (event) => {
-      event.preventDefault();
-      if (uploadMutation.isPending) {
-        return;
-      }
-
-      dragDepthRef.current += 1;
-      setIsDragging(true);
-    },
-    [uploadMutation.isPending]
-  );
-
-  const handleDragOver = React.useCallback<React.DragEventHandler<HTMLDivElement>>(
-    (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = uploadMutation.isPending ? "none" : "copy";
-    },
-    [uploadMutation.isPending]
-  );
-
-  const handleDragLeave = React.useCallback<React.DragEventHandler<HTMLDivElement>>((event) => {
-    event.preventDefault();
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) {
-      setIsDragging(false);
-    }
-  }, []);
-
-  const handleDrop = React.useCallback<React.DragEventHandler<HTMLDivElement>>(
-    (event) => {
-      event.preventDefault();
-      dragDepthRef.current = 0;
-      setIsDragging(false);
-
-      if (uploadMutation.isPending) {
-        return;
-      }
-
-      const file = event.dataTransfer.files?.[0];
-      if (file) {
-        handleFile(file);
-      }
-    },
-    [handleFile, uploadMutation.isPending]
-  );
-
-  const successNotice =
-    createdBatchId && uploadPhase === "redirecting" ? (
-      <div className="w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-left">
-        <p className="text-sm font-medium text-emerald-100">Import batch created. Opening batch detail...</p>
-        <a
-          href={`/app/imports/${createdBatchId}`}
-          className="mt-2 inline-flex text-sm font-semibold text-emerald-200 underline decoration-emerald-300/40 underline-offset-4 hover:text-white"
-        >
-          Open batch detail
-        </a>
-      </div>
-    ) : null;
-
-  const duplicateNotice = duplicateWarning ? (
-    <div className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left">
-      <p className="text-sm font-medium text-amber-100">{duplicateWarning}</p>
-    </div>
-  ) : null;
 
   const retryNoticeBanner = retryNotice ? (
     <div
@@ -273,49 +190,30 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
     </div>
   ) : null;
 
+  const successMessage = createdBatchId && uploadPhase === "redirecting" ? "Import batch created. Opening batch detail..." : "";
+
   return (
-    <section className="space-y-6">
+    <section className="mx-auto flex max-w-5xl flex-col gap-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight text-white">Imports</h1>
-        <p className="text-sm text-slate-400">
-          Upload provider exports, reduce import mistakes, and monitor batch health from one place.
-        </p>
+        <p className="text-sm text-slate-400">Upload call exports and monitor recent batches.</p>
       </header>
 
-      <ImportDropzone
-        isDragging={isDragging}
-        isUploading={uploadMutation.isPending}
-        uploadPhaseLabel={uploadPhase ? IMPORT_UPLOAD_PHASE_LABELS[uploadPhase] : null}
-        onFileSelect={handleFile}
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        providerSelector={
-          <ImportProviderSelector
-            value={provider}
-            onChange={setProvider}
-            disabled={uploadMutation.isPending}
-          />
-        }
-        providerHelp={<ImportProviderHelp provider={provider} />}
-        error={errorState ? <ImportUploadError error={errorState} /> : null}
-        warning={duplicateNotice}
-        success={successNotice}
+      <NewImportCard
+        mode={mode}
+        selectedProvider={provider}
+        uploadPhase={uploadPhase}
+        errorState={errorState}
+        successMessage={successMessage}
+        duplicateWarning={duplicateWarning}
+        onModeChange={setMode}
+        onProviderChange={setProvider}
+        onFileSelected={handleFile}
       />
 
-      <ImportSummaryCards batches={importsQuery.data.batches} />
-      {retryNoticeBanner}
-      <ImportBatchTable
+      <RecentImportsCard
         batches={importsQuery.data.batches}
-        filteredBatches={filteredBatches}
-        isRefreshing={importsQuery.isFetching}
-        search={search}
-        providerFilter={providerFilter}
-        statusFilter={statusFilter}
-        onSearchChange={setSearch}
-        onProviderFilterChange={setProviderFilter}
-        onStatusFilterChange={setStatusFilter}
+        notice={retryNoticeBanner}
         onRetryBatch={(batch) => retryMutation.mutate(batch)}
         retryingBatchId={retryingBatchId}
       />

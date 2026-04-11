@@ -5,9 +5,10 @@ interface Props {
   integrations: IntegrationCard[];
   selectedIntegrationId: string | null;
   onSelect: (provider: string) => void;
+  onLaunchWizard: (provider: string) => void;
 }
 
-export function IntegrationSummaryList({ integrations, selectedIntegrationId, onSelect }: Props) {
+export function IntegrationSummaryList({ integrations, selectedIntegrationId, onSelect, onLaunchWizard }: Props) {
   return (
     <section className="space-y-4">
       <div>
@@ -25,6 +26,7 @@ export function IntegrationSummaryList({ integrations, selectedIntegrationId, on
             integration={integration}
             isSelected={integration.provider === selectedIntegrationId}
             onSelect={() => onSelect(integration.provider)}
+            onLaunchWizard={() => onLaunchWizard(integration.provider)}
           />
         ))}
       </div>

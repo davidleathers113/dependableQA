@@ -20,7 +20,7 @@ export function ImportEmptyState({
       </div>
       <p className="text-lg font-semibold text-slate-200">{title}</p>
       <p className="text-sm text-slate-400">{body}</p>
-      <p className="text-sm text-slate-500">{helper}</p>
+      {helper ? <p className="text-sm text-slate-500">{helper}</p> : null}
       <a
         href={ctaHref}
         className="inline-flex rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-100 transition-colors hover:bg-slate-800"

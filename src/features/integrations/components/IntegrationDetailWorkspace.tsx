@@ -12,13 +12,48 @@ interface Props {
   currentUserRole: string;
   integration: IntegrationsSummary["integrations"][number];
   organizationId: string;
+  focusSection: "health" | "setup" | null;
+  onFocusHandled: () => void;
+  isCreatingIntegration: boolean;
+  onCreateIntegration: () => void;
+  onLaunchWizard: () => void;
+  externalNotice: { type: "success" | "error"; text: string } | null;
 }
 
-export function IntegrationDetailWorkspace({ currentUserRole, integration, organizationId }: Props) {
+export function IntegrationDetailWorkspace({
+  currentUserRole,
+  integration,
+  organizationId,
+  focusSection,
+  onFocusHandled,
+  isCreatingIntegration,
+  onCreateIntegration,
+  onLaunchWizard,
+  externalNotice,
+}: Props) {
   const queryClient = useQueryClient();
   const canManage = currentUserRole === "owner" || currentUserRole === "admin";
   const [errorMessage, setErrorMessage] = React.useState("");
   const [successMessage, setSuccessMessage] = React.useState("");
+  const [highlightSetup, setHighlightSetup] = React.useState(false);
+  const setupPanelRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (focusSection !== "setup") {
+      return;
+    }
+
+    setHighlightSetup(true);
+    window.requestAnimationFrame(() => {
+      setupPanelRef.current?.focus();
+    });
+    const timeout = window.setTimeout(() => {
+      setHighlightSetup(false);
+      onFocusHandled();
+    }, 2600);
+
+    return () => window.clearTimeout(timeout);
+  }, [focusSection, onFocusHandled]);
 
   const updateMutation = useMutation({
     mutationFn: async (input: {
@@ -88,38 +123,6 @@ export function IntegrationDetailWorkspace({ currentUserRole, integration, organ
     },
   });
 
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch("/api/settings/integrations", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "create-integration",
-          provider: integration.provider,
-          displayName: integration.displayName,
-        }),
-      });
-
-      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Unable to create integration.");
-      }
-
-      return payload;
-    },
-    onSuccess: async (payload) => {
-      setErrorMessage("");
-      setSuccessMessage(payload.message ?? "Integration created.");
-      await queryClient.invalidateQueries({ queryKey: ["integrations", organizationId] });
-    },
-    onError: (error) => {
-      setSuccessMessage("");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to create integration.");
-    },
-  });
-
   return (
     <section className="space-y-5 rounded-2xl border border-slate-800 bg-slate-950/40 p-1">
       <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
@@ -149,6 +152,16 @@ export function IntegrationDetailWorkspace({ currentUserRole, integration, organ
           </div>
         ) : null}
 
+        {externalNotice?.type === "error" ? (
+          <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {externalNotice.text}
+          </div>
+        ) : null}
+        {externalNotice?.type === "success" ? (
+          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            {externalNotice.text}
+          </div>
+        ) : null}
         {errorMessage ? (
           <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             {errorMessage}
@@ -162,18 +175,30 @@ export function IntegrationDetailWorkspace({ currentUserRole, integration, organ
       </div>
 
       <IntegrationHealthPanel integration={integration} />
-      <IntegrationSetupPanel
-        integration={integration}
-        canManage={canManage}
-        isTesting={testMutation.isPending || createMutation.isPending}
-        onSendTestEvent={() => testMutation.mutate()}
-      />
+      <div
+        ref={setupPanelRef}
+        tabIndex={-1}
+        className={`rounded-[1.1rem] outline-none transition-all duration-300 ${
+          highlightSetup
+            ? "bg-violet-500/5 shadow-[0_0_0_1px_rgba(139,92,246,0.65),0_0_0_8px_rgba(139,92,246,0.08),0_0_48px_rgba(139,92,246,0.18)]"
+            : ""
+        }`}
+      >
+        <IntegrationSetupPanel
+          integration={integration}
+          canManage={canManage}
+          isTesting={testMutation.isPending}
+          isCreating={isCreatingIntegration}
+          onSendTestEvent={() => testMutation.mutate()}
+          onLaunchWizard={onLaunchWizard}
+        />
+      </div>
       <IntegrationSecurityPanel
         canManage={canManage}
         integration={integration}
         isSaving={updateMutation.isPending}
-        isCreating={createMutation.isPending}
-        onCreateIntegration={() => createMutation.mutate()}
+        isCreating={isCreatingIntegration}
+        onCreateIntegration={onCreateIntegration}
         onSave={(input) => updateMutation.mutate(input)}
       />
       <IntegrationDiagnosticsPanel integration={integration} />
