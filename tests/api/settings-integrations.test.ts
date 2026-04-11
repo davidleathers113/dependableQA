@@ -7,17 +7,39 @@ const {
   requireApiSession,
   getAdminSupabase,
   sendIntegrationTestEvent,
+  supportedIntegrationCatalog,
 } = vi.hoisted(() => ({
   getIntegrationsSummary: vi.fn(),
   insertAuditLog: vi.fn(),
   requireApiSession: vi.fn(),
   getAdminSupabase: vi.fn(),
   sendIntegrationTestEvent: vi.fn(),
+  supportedIntegrationCatalog: [
+    {
+      provider: "ringba",
+      fallbackId: "catalog:ringba",
+      defaultDisplayName: "Ringba Primary",
+      defaultMode: "webhook",
+    },
+    {
+      provider: "trackdrive",
+      fallbackId: "catalog:trackdrive",
+      defaultDisplayName: "TrackDrive",
+      defaultMode: "webhook",
+    },
+    {
+      provider: "retreaver",
+      fallbackId: "catalog:retreaver",
+      defaultDisplayName: "Retreaver",
+      defaultMode: "webhook",
+    },
+  ],
 }));
 
 vi.mock("../../src/lib/app-data", () => ({
   getIntegrationsSummary,
   insertAuditLog,
+  SUPPORTED_INTEGRATION_CATALOG: supportedIntegrationCatalog,
 }));
 
 vi.mock("../../src/lib/auth/request-session", () => ({
@@ -38,27 +60,84 @@ function createApiContext(context: Partial<APIContext>): APIContext {
   return context as APIContext;
 }
 
-function createIntegrationsAdminClient(existingConfig: Record<string, unknown> = {}) {
+function createIntegrationsAdminClient(
+  existingConfig: Record<string, unknown> = {},
+  options?: {
+    existingById?: boolean;
+    existingByProvider?: boolean;
+    insertedId?: string;
+    insertedDisplayName?: string;
+  }
+) {
   let updatedValues: Record<string, unknown> | null = null;
+  let insertedValues: Record<string, unknown> | null = null;
+  const filters: Record<string, unknown> = {};
 
   const selectQuery = {
     eq: vi.fn(),
-    maybeSingle: vi.fn().mockResolvedValue({
-      data: {
-        id: "integration_1",
-        display_name: "Primary Integration",
-        config: existingConfig,
-      },
-      error: null,
+    maybeSingle: vi.fn().mockImplementation(async () => {
+      if (filters.id) {
+        if (options?.existingById === false) {
+          return { data: null, error: null };
+        }
+
+        return {
+          data: {
+            id: "integration_1",
+            display_name: "Primary Integration",
+            config: existingConfig,
+          },
+          error: null,
+        };
+      }
+
+      if (filters.provider) {
+        if (options?.existingByProvider === false) {
+          return { data: null, error: null };
+        }
+
+        return {
+          data: {
+            id: "integration_1",
+            display_name: options?.insertedDisplayName ?? "Primary Integration",
+            config: existingConfig,
+          },
+          error: null,
+        };
+      }
+
+      return {
+        data: {
+          id: "integration_1",
+          display_name: "Primary Integration",
+          config: existingConfig,
+        },
+        error: null,
+      };
     }),
   };
-  selectQuery.eq.mockImplementation(() => selectQuery);
+  selectQuery.eq.mockImplementation((column: string, value: unknown) => {
+    filters[column] = value;
+    return selectQuery;
+  });
 
   const updateQuery = {
     error: null as { message: string } | null,
     eq: vi.fn(),
   };
   updateQuery.eq.mockImplementation(() => updateQuery);
+
+  const insertQuery = {
+    select: vi.fn(() => ({
+      single: vi.fn().mockResolvedValue({
+        data: {
+          id: options?.insertedId ?? "integration_2",
+          display_name: options?.insertedDisplayName ?? "TrackDrive",
+        },
+        error: null,
+      }),
+    })),
+  };
 
   const client = {
     from: vi.fn(() => ({
@@ -67,6 +146,10 @@ function createIntegrationsAdminClient(existingConfig: Record<string, unknown> =
         updatedValues = values;
         return updateQuery;
       }),
+      insert: vi.fn((values: Record<string, unknown>) => {
+        insertedValues = values;
+        return insertQuery;
+      }),
     })),
   };
 
@@ -74,6 +157,9 @@ function createIntegrationsAdminClient(existingConfig: Record<string, unknown> =
     client,
     getUpdatedValues() {
       return updatedValues;
+    },
+    getInsertedValues() {
+      return insertedValues;
     },
   };
 }
@@ -256,6 +342,8 @@ describe("/api/settings/integrations", () => {
       integrations: [
         {
           id: "integration_1",
+          isConfigured: true,
+          isCatalogPlaceholder: false,
           displayName: "Primary Integration",
           provider: "ringba",
           status: "connected",
@@ -294,6 +382,8 @@ describe("/api/settings/integrations", () => {
       message: "Test event accepted.",
       integration: {
         id: "integration_1",
+        isConfigured: true,
+        isCatalogPlaceholder: false,
         displayName: "Primary Integration",
         provider: "ringba",
         status: "connected",
@@ -308,6 +398,135 @@ describe("/api/settings/integrations", () => {
           prefix: "sha256=",
           secretConfigured: true,
           secretSource: "integration",
+        },
+        recentEvents: [],
+      },
+    });
+  });
+
+  it("creates a missing provider integration and returns refreshed summary data", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client, getInsertedValues } = createIntegrationsAdminClient(
+      {},
+      {
+        existingByProvider: false,
+        insertedId: "integration_2",
+        insertedDisplayName: "TrackDrive",
+      }
+    );
+    getAdminSupabase.mockReturnValue(client);
+    getIntegrationsSummary.mockResolvedValue({
+      integrations: [
+        {
+          id: "catalog:ringba",
+          isConfigured: false,
+          isCatalogPlaceholder: true,
+          displayName: "Ringba Primary",
+          provider: "ringba",
+          status: "disconnected",
+          mode: "webhook",
+          lastSuccessAt: null,
+          lastErrorAt: null,
+          lastEventMessage: null,
+          lastEventSeverity: null,
+          webhookAuth: {
+            authType: "hmac-sha256",
+            headerName: "x-dependableqa-signature",
+            prefix: "sha256=",
+            secretConfigured: false,
+            secretSource: "none",
+          },
+          recentEvents: [],
+        },
+        {
+          id: "integration_2",
+          isConfigured: true,
+          isCatalogPlaceholder: false,
+          displayName: "TrackDrive",
+          provider: "trackdrive",
+          status: "disconnected",
+          mode: "webhook",
+          lastSuccessAt: null,
+          lastErrorAt: null,
+          lastEventMessage: null,
+          lastEventSeverity: null,
+          webhookAuth: {
+            authType: "hmac-sha256",
+            headerName: "x-dependableqa-signature",
+            prefix: "sha256=",
+            secretConfigured: false,
+            secretSource: "none",
+          },
+          recentEvents: [],
+        },
+        {
+          id: "catalog:retreaver",
+          isConfigured: false,
+          isCatalogPlaceholder: true,
+          displayName: "Retreaver",
+          provider: "retreaver",
+          status: "disconnected",
+          mode: "webhook",
+          lastSuccessAt: null,
+          lastErrorAt: null,
+          lastEventMessage: null,
+          lastEventSeverity: null,
+          webhookAuth: {
+            authType: "hmac-sha256",
+            headerName: "x-dependableqa-signature",
+            prefix: "sha256=",
+            secretConfigured: false,
+            secretSource: "none",
+          },
+          recentEvents: [],
+        },
+      ],
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create-integration",
+          provider: "trackdrive",
+          displayName: "TrackDrive",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(getInsertedValues()).toEqual(expect.objectContaining({
+      organization_id: "org_1",
+      provider: "trackdrive",
+      display_name: "TrackDrive",
+      mode: "webhook",
+      status: "disconnected",
+    }));
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      message: "TrackDrive created.",
+      integration: {
+        id: "integration_2",
+        isConfigured: true,
+        isCatalogPlaceholder: false,
+        displayName: "TrackDrive",
+        provider: "trackdrive",
+        status: "disconnected",
+        mode: "webhook",
+        lastSuccessAt: null,
+        lastErrorAt: null,
+        lastEventMessage: null,
+        lastEventSeverity: null,
+        webhookAuth: {
+          authType: "hmac-sha256",
+          headerName: "x-dependableqa-signature",
+          prefix: "sha256=",
+          secretConfigured: false,
+          secretSource: "none",
         },
         recentEvents: [],
       },

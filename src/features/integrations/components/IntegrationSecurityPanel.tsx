@@ -7,6 +7,8 @@ interface Props {
   canManage: boolean;
   integration: IntegrationCard;
   isSaving: boolean;
+  isCreating: boolean;
+  onCreateIntegration: () => void;
   onSave: (input: {
     authType: IntegrationCard["webhookAuth"]["authType"];
     headerName: string;
@@ -15,7 +17,14 @@ interface Props {
   }) => void;
 }
 
-export function IntegrationSecurityPanel({ canManage, integration, isSaving, onSave }: Props) {
+export function IntegrationSecurityPanel({
+  canManage,
+  integration,
+  isSaving,
+  isCreating,
+  onCreateIntegration,
+  onSave,
+}: Props) {
   const [authType, setAuthType] = React.useState(integration.webhookAuth.authType);
   const [headerName, setHeaderName] = React.useState(integration.webhookAuth.headerName);
   const [prefix, setPrefix] = React.useState(integration.webhookAuth.prefix);
@@ -96,7 +105,7 @@ export function IntegrationSecurityPanel({ canManage, integration, isSaving, onS
                 setPrefix("sha256=");
               }
             }}
-            disabled={!canManage || isSaving}
+            disabled={!canManage || isSaving || !integration.isConfigured}
             className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
           >
             <option value="hmac-sha256">HMAC SHA-256</option>
@@ -109,7 +118,7 @@ export function IntegrationSecurityPanel({ canManage, integration, isSaving, onS
           <input
             value={headerName}
             onChange={(event) => setHeaderName(event.target.value)}
-            disabled={!canManage || isSaving}
+            disabled={!canManage || isSaving || !integration.isConfigured}
             className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
           />
         </label>
@@ -119,7 +128,7 @@ export function IntegrationSecurityPanel({ canManage, integration, isSaving, onS
           <input
             value={prefix}
             onChange={(event) => setPrefix(event.target.value)}
-            disabled={!canManage || isSaving || isSharedSecret}
+            disabled={!canManage || isSaving || isSharedSecret || !integration.isConfigured}
             placeholder={isSharedSecret ? "Prefix is not used for shared-secret validation." : "sha256="}
             className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
           />
@@ -130,7 +139,7 @@ export function IntegrationSecurityPanel({ canManage, integration, isSaving, onS
           <input
             value={secret}
             onChange={(event) => setSecret(event.target.value)}
-            disabled={!canManage || isSaving}
+            disabled={!canManage || isSaving || !integration.isConfigured}
             type="password"
             placeholder="Enter a new secret to rotate it"
             className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
@@ -155,6 +164,12 @@ export function IntegrationSecurityPanel({ canManage, integration, isSaving, onS
           : "DependableQA will verify the request signature in the configured header using the secret below."}
       </div>
 
+      {!integration.isConfigured ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          Create this integration before saving provider-specific security settings.
+        </div>
+      ) : null}
+
       {validationMessage ? (
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
           {validationMessage}
@@ -164,18 +179,32 @@ export function IntegrationSecurityPanel({ canManage, integration, isSaving, onS
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <p className="text-xs text-slate-500">
           {canManage
-            ? "Security settings saved here apply to inbound provider requests."
+            ? integration.isConfigured
+              ? "Security settings saved here apply to inbound provider requests."
+              : "Only setup guidance is available until this integration is created."
             : "Only owners and admins can edit integration settings."}
         </p>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!canManage || isSaving}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-60"
-        >
-          <Save className="h-4 w-4" />
-          {isSaving ? "Saving..." : "Save security settings"}
-        </button>
+        {integration.isConfigured ? (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!canManage || isSaving}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" />
+            {isSaving ? "Saving..." : "Save security settings"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onCreateIntegration}
+            disabled={!canManage || isCreating}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" />
+            {isCreating ? "Creating..." : `Create ${integration.displayName} integration`}
+          </button>
+        )}
       </div>
     </section>
   );

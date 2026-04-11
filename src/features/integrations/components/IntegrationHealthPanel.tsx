@@ -18,6 +18,9 @@ function DetailField({ label, value }: { label: string; value: string }) {
 
 export function IntegrationHealthPanel({ integration }: Props) {
   const health = getIntegrationHealth(integration);
+  const latestEventValue = !integration.isConfigured
+    ? "This provider has not been configured yet."
+    : getIntegrationLatestEventText(integration);
 
   return (
     <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5">
@@ -45,7 +48,7 @@ export function IntegrationHealthPanel({ integration }: Props) {
             <Activity className="h-4 w-4" />
             <p className="text-sm font-semibold">Latest event</p>
           </div>
-          <p className="mt-2 text-sm text-slate-100">{getIntegrationLatestEventText(integration)}</p>
+          <p className="mt-2 text-sm text-slate-100">{latestEventValue}</p>
         </div>
       </div>
     </section>

@@ -78,6 +78,11 @@ export function IntegrationSetupPanel({ integration, canManage, isTesting, onSen
           <p className="text-sm font-semibold">{getIntegrationSetupHeading(integration)}</p>
         </div>
         <p className="mt-3 text-sm text-slate-300">{getIntegrationSetupDescription(integration)}</p>
+        {!integration.isConfigured ? (
+          <p className="mt-3 text-sm text-slate-400">
+            Create this integration first, then send a test event after your provider settings are saved.
+          </p>
+        ) : null}
       </div>
     </section>
   );

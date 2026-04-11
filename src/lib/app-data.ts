@@ -205,6 +205,34 @@ export type BillingLedgerEntryType =
   | string;
 export type BillingLedgerEntryStatus = "completed" | "applied" | "failed" | "pending" | string;
 
+export interface SupportedIntegrationCatalogEntry {
+  provider: IntegrationProvider;
+  fallbackId: string;
+  defaultDisplayName: string;
+  defaultMode: Database["public"]["Enums"]["source_kind"];
+}
+
+export const SUPPORTED_INTEGRATION_CATALOG: SupportedIntegrationCatalogEntry[] = [
+  {
+    provider: "ringba",
+    fallbackId: "catalog:ringba",
+    defaultDisplayName: "Ringba Primary",
+    defaultMode: "webhook",
+  },
+  {
+    provider: "trackdrive",
+    fallbackId: "catalog:trackdrive",
+    defaultDisplayName: "TrackDrive",
+    defaultMode: "webhook",
+  },
+  {
+    provider: "retreaver",
+    fallbackId: "catalog:retreaver",
+    defaultDisplayName: "Retreaver",
+    defaultMode: "webhook",
+  },
+];
+
 export interface BillingPaymentMethodSummary {
   brand: string | null;
   last4: string | null;
@@ -264,6 +292,8 @@ export interface BillingSummary {
 
 export interface IntegrationCard {
   id: string;
+  isConfigured: boolean;
+  isCatalogPlaceholder: boolean;
   displayName: string;
   provider: IntegrationProvider;
   status: string;
@@ -2483,20 +2513,75 @@ export async function getIntegrationsSummary(
     }
   }
 
-  return {
-    integrations: ((integrationsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
-      id: asString(row.id),
+  const integrationsRows = (integrationsResult.data ?? []) as Array<Record<string, unknown>>;
+  const integrationsByProvider = new Map<IntegrationProvider, Record<string, unknown>>();
+  for (const row of integrationsRows) {
+    const provider = (asString(row.provider) || "custom") as IntegrationProvider;
+    if (!integrationsByProvider.has(provider)) {
+      integrationsByProvider.set(provider, row);
+    }
+  }
+
+  function toIntegrationCard(row: Record<string, unknown>): IntegrationCard {
+    const integrationId = asString(row.id);
+
+    return {
+      id: integrationId,
+      isConfigured: true,
+      isCatalogPlaceholder: false,
       displayName: asString(row.display_name),
       provider: (asString(row.provider) || "custom") as IntegrationProvider,
       status: asString(row.status),
       mode: asString(row.mode),
       lastSuccessAt: asNullableString(row.last_success_at),
       lastErrorAt: asNullableString(row.last_error_at),
-      lastEventMessage: latestByIntegration.get(asString(row.id))?.message ?? null,
-      lastEventSeverity: latestByIntegration.get(asString(row.id))?.severity ?? null,
+      lastEventMessage: latestByIntegration.get(integrationId)?.message ?? null,
+      lastEventSeverity: latestByIntegration.get(integrationId)?.severity ?? null,
       webhookAuth: getPublicIntegrationWebhookAuth(row.config, defaults),
-      recentEvents: recentEventsByIntegration.get(asString(row.id)) ?? [],
-    })),
+      recentEvents: recentEventsByIntegration.get(integrationId) ?? [],
+    };
+  }
+
+  function buildPlaceholderCard(entry: SupportedIntegrationCatalogEntry): IntegrationCard {
+    return {
+      id: entry.fallbackId,
+      isConfigured: false,
+      isCatalogPlaceholder: true,
+      displayName: entry.defaultDisplayName,
+      provider: entry.provider,
+      status: "disconnected",
+      mode: entry.defaultMode,
+      lastSuccessAt: null,
+      lastErrorAt: null,
+      lastEventMessage: null,
+      lastEventSeverity: null,
+      webhookAuth: getPublicIntegrationWebhookAuth({}, defaults),
+      recentEvents: [],
+    };
+  }
+
+  const configuredIds = new Set<string>();
+  const integrations = SUPPORTED_INTEGRATION_CATALOG.map((entry) => {
+    const existing = integrationsByProvider.get(entry.provider);
+    if (existing) {
+      configuredIds.add(asString(existing.id));
+      return toIntegrationCard(existing);
+    }
+
+    return buildPlaceholderCard(entry);
+  });
+
+  for (const row of integrationsRows) {
+    const integrationId = asString(row.id);
+    if (!integrationId || configuredIds.has(integrationId)) {
+      continue;
+    }
+
+    integrations.push(toIntegrationCard(row));
+  }
+
+  return {
+    integrations,
   };
 }
 

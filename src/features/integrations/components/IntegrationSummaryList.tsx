@@ -4,7 +4,7 @@ import { IntegrationSummaryCard } from "./IntegrationSummaryCard";
 interface Props {
   integrations: IntegrationCard[];
   selectedIntegrationId: string | null;
-  onSelect: (integrationId: string) => void;
+  onSelect: (provider: string) => void;
 }
 
 export function IntegrationSummaryList({ integrations, selectedIntegrationId, onSelect }: Props) {
@@ -23,8 +23,8 @@ export function IntegrationSummaryList({ integrations, selectedIntegrationId, on
           <IntegrationSummaryCard
             key={integration.id}
             integration={integration}
-            isSelected={integration.id === selectedIntegrationId}
-            onSelect={() => onSelect(integration.id)}
+            isSelected={integration.provider === selectedIntegrationId}
+            onSelect={() => onSelect(integration.provider)}
           />
         ))}
       </div>

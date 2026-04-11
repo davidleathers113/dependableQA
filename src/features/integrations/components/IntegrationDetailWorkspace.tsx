@@ -1,10 +1,10 @@
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { PlugZap } from "lucide-react";
 import type { IntegrationsSummary } from "../../../lib/app-data";
 import { getIntegrationProviderLabel } from "../helpers";
 import { IntegrationDiagnosticsPanel } from "./IntegrationDiagnosticsPanel";
 import { IntegrationHealthPanel } from "./IntegrationHealthPanel";
+import { IntegrationProviderIcon } from "./IntegrationProviderIcon";
 import { IntegrationSecurityPanel } from "./IntegrationSecurityPanel";
 import { IntegrationSetupPanel } from "./IntegrationSetupPanel";
 
@@ -88,14 +88,48 @@ export function IntegrationDetailWorkspace({ currentUserRole, integration, organ
     },
   });
 
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/settings/integrations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "create-integration",
+          provider: integration.provider,
+          displayName: integration.displayName,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to create integration.");
+      }
+
+      return payload;
+    },
+    onSuccess: async (payload) => {
+      setErrorMessage("");
+      setSuccessMessage(payload.message ?? "Integration created.");
+      await queryClient.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (error) => {
+      setSuccessMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to create integration.");
+    },
+  });
+
   return (
     <section className="space-y-5 rounded-2xl border border-slate-800 bg-slate-950/40 p-1">
       <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-800 text-slate-100">
-              <PlugZap className="h-5 w-5" />
-            </div>
+            <IntegrationProviderIcon
+              provider={integration.provider}
+              sizeClassName="h-5 w-5"
+              containerClassName="flex h-11 w-11 items-center justify-center rounded-xl"
+            />
             <div>
               <h2 className="text-xl font-semibold text-white">{integration.displayName}</h2>
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -108,6 +142,12 @@ export function IntegrationDetailWorkspace({ currentUserRole, integration, organ
             activity from one workspace.
           </p>
         </div>
+        {!integration.isConfigured ? (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            This provider has not been configured yet. Create the integration to save security settings and start
+            receiving provider events.
+          </div>
+        ) : null}
 
         {errorMessage ? (
           <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -125,13 +165,15 @@ export function IntegrationDetailWorkspace({ currentUserRole, integration, organ
       <IntegrationSetupPanel
         integration={integration}
         canManage={canManage}
-        isTesting={testMutation.isPending}
+        isTesting={testMutation.isPending || createMutation.isPending}
         onSendTestEvent={() => testMutation.mutate()}
       />
       <IntegrationSecurityPanel
         canManage={canManage}
         integration={integration}
         isSaving={updateMutation.isPending}
+        isCreating={createMutation.isPending}
+        onCreateIntegration={() => createMutation.mutate()}
         onSave={(input) => updateMutation.mutate(input)}
       />
       <IntegrationDiagnosticsPanel integration={integration} />

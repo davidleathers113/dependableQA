@@ -30,28 +30,28 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
   });
 
   const integrations = integrationsQuery.data.integrations;
-  const [selectedIntegrationId, setSelectedIntegrationId] = React.useState<string | null>(
-    initialData.integrations[0]?.id ?? null
+  const [selectedProvider, setSelectedProvider] = React.useState<string | null>(
+    initialData.integrations[0]?.provider ?? null
   );
   const detailRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     if (integrations.length === 0) {
-      setSelectedIntegrationId(null);
+      setSelectedProvider(null);
       return;
     }
 
-    const selectedStillExists = integrations.some((integration) => integration.id === selectedIntegrationId);
+    const selectedStillExists = integrations.some((integration) => integration.provider === selectedProvider);
     if (!selectedStillExists) {
-      setSelectedIntegrationId(integrations[0]?.id ?? null);
+      setSelectedProvider(integrations[0]?.provider ?? null);
     }
-  }, [integrations, selectedIntegrationId]);
+  }, [integrations, selectedProvider]);
 
   const selectedIntegration =
-    integrations.find((integration) => integration.id === selectedIntegrationId) ?? integrations[0] ?? null;
+    integrations.find((integration) => integration.provider === selectedProvider) ?? integrations[0] ?? null;
 
-  const handleSelectIntegration = React.useCallback((integrationId: string) => {
-    setSelectedIntegrationId(integrationId);
+  const handleSelectIntegration = React.useCallback((provider: string) => {
+    setSelectedProvider(provider);
     window.requestAnimationFrame(() => {
       detailRef.current?.focus();
       detailRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -86,7 +86,7 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
             <div className="lg:col-span-1">
               <IntegrationSummaryList
                 integrations={integrations}
-                selectedIntegrationId={selectedIntegration?.id ?? null}
+                selectedIntegrationId={selectedIntegration?.provider ?? null}
                 onSelect={handleSelectIntegration}
               />
             </div>

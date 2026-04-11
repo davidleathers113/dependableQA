@@ -11,6 +11,8 @@ import {
 function createIntegration(overrides: Partial<IntegrationCard> = {}): IntegrationCard {
   return {
     id: "integration-1",
+    isConfigured: true,
+    isCatalogPlaceholder: false,
     displayName: "Ringba",
     provider: "ringba",
     status: "connected",
@@ -39,6 +41,21 @@ describe("integration helpers", () => {
       state: "needs-configuration",
       label: "Needs configuration",
       description: "Webhook signing is incomplete, so inbound events cannot be trusted yet.",
+    });
+  });
+
+  it("derives needs configuration for catalog placeholders", () => {
+    const health = getIntegrationHealth(
+      createIntegration({
+        isConfigured: false,
+        isCatalogPlaceholder: true,
+      })
+    );
+
+    expect(health).toEqual({
+      state: "needs-configuration",
+      label: "Needs configuration",
+      description: "This provider has not been configured yet.",
     });
   });
 
@@ -141,6 +158,35 @@ describe("integration helpers", () => {
     expect(meta.setupModelDescription).toBe("Webhook ingest with signed provider payloads.");
     expect(meta.latestStatusLabel.startsWith("Last success:")).toBe(true);
     expect(meta.primaryActionLabel).toBe("Configure");
+  });
+
+  it("shows recent event recorded when timestamps are missing but recent events exist", () => {
+    const meta = getIntegrationSummaryMeta(
+      createIntegration({
+        recentEvents: [
+          {
+            id: "event-1",
+            eventType: "webhook.test.accepted",
+            severity: "info",
+            message: "Test event accepted.",
+            createdAt: "2026-04-10T00:00:00.000Z",
+          },
+        ],
+      })
+    );
+
+    expect(meta.latestStatusLabel).toBe("Recent event recorded");
+  });
+
+  it("prefers the newest success timestamp over an older error", () => {
+    const meta = getIntegrationSummaryMeta(
+      createIntegration({
+        lastSuccessAt: "2026-04-10T00:00:00.000Z",
+        lastErrorAt: "2026-04-09T00:00:00.000Z",
+      })
+    );
+
+    expect(meta.latestStatusLabel.startsWith("Last success:")).toBe(true);
   });
 
   it("uses a warning-oriented diagnostics summary line for degraded integrations", () => {

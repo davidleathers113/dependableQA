@@ -97,6 +97,14 @@ export function getIntegrationSetupModelDescription(provider: IntegrationProvide
 }
 
 export function getIntegrationHealth(integration: IntegrationCard): IntegrationHealthSummary {
+  if (!integration.isConfigured || integration.isCatalogPlaceholder) {
+    return {
+      state: "needs-configuration",
+      label: "Needs configuration",
+      description: "This provider has not been configured yet.",
+    };
+  }
+
   const hasSecret = integration.webhookAuth.secretConfigured;
   const hasSuccess = Boolean(integration.lastSuccessAt);
   const hasError = Boolean(integration.lastErrorAt);
@@ -150,18 +158,35 @@ export function getWebhookEndpointUrl() {
 }
 
 export function getIntegrationLatestStatusLabel(integration: IntegrationCard) {
-  if (integration.lastErrorAt) {
+  if (!integration.isConfigured) {
+    return "No events received yet";
+  }
+
+  const lastErrorTime = integration.lastErrorAt ? new Date(integration.lastErrorAt).getTime() : Number.NaN;
+  const lastSuccessTime = integration.lastSuccessAt ? new Date(integration.lastSuccessAt).getTime() : Number.NaN;
+  const hasValidError = !Number.isNaN(lastErrorTime);
+  const hasValidSuccess = !Number.isNaN(lastSuccessTime);
+
+  if (hasValidError && (!hasValidSuccess || lastErrorTime >= lastSuccessTime)) {
     return `Last error: ${formatIntegrationDateTime(integration.lastErrorAt)}`;
   }
 
-  if (integration.lastSuccessAt) {
+  if (hasValidSuccess) {
     return `Last success: ${formatIntegrationDateTime(integration.lastSuccessAt)}`;
+  }
+
+  if (integration.recentEvents.length > 0) {
+    return "Recent event recorded";
   }
 
   return "No events received yet";
 }
 
 export function getIntegrationPrimaryActionLabel(integration: IntegrationCard) {
+  if (!integration.isConfigured) {
+    return "Configure";
+  }
+
   const health = getIntegrationHealth(integration);
   return health.state === "needs-configuration" ? "Configure" : "Open details";
 }
@@ -187,6 +212,10 @@ export function getSecretSourceLabel(secretSource: IntegrationCard["webhookAuth"
 }
 
 export function getSecretStateLabel(integration: IntegrationCard) {
+  if (!integration.isConfigured) {
+    return "No secret configured";
+  }
+
   if (integration.webhookAuth.secretSource === "integration") {
     return "Integration-specific secret configured";
   }
@@ -267,6 +296,10 @@ export function getIntegrationSetupHeading(integration: IntegrationCard) {
 }
 
 export function getIntegrationLatestEventText(integration: IntegrationCard) {
+  if (!integration.isConfigured) {
+    return "This provider has not been configured yet.";
+  }
+
   const health = getIntegrationHealth(integration);
 
   if (integration.lastEventMessage) {
@@ -316,6 +349,10 @@ export function getDiagnosticsSummary(integration: IntegrationCard) {
 }
 
 export function getDiagnosticsSummaryLine(integration: IntegrationCard) {
+  if (!integration.isConfigured) {
+    return "No webhook events have been recorded yet for this integration.";
+  }
+
   const health = getIntegrationHealth(integration);
 
   if (integration.recentEvents.length === 0) {

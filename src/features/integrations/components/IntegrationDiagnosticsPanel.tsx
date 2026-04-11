@@ -61,7 +61,9 @@ export function IntegrationDiagnosticsPanel({ integration }: Props) {
         <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-4">
           <p className="text-sm font-semibold text-white">No recent events</p>
           <p className="mt-1 text-sm text-slate-400">
-            Events will appear here after the provider sends webhooks to DependableQA.
+            {integration.isConfigured
+              ? "Events will appear here after the provider sends webhooks to DependableQA."
+              : "This provider has not been configured yet, so DependableQA has not received any webhook events."}
           </p>
         </div>
       ) : (

@@ -1,6 +1,7 @@
-import { ChevronRight, PlugZap } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import type { IntegrationCard } from "../../../lib/app-data";
 import { getIntegrationProviderLabel, getIntegrationSummaryMeta, getIntegrationHealth } from "../helpers";
+import { IntegrationProviderIcon } from "./IntegrationProviderIcon";
 import { IntegrationStatusBadge } from "./IntegrationStatusBadge";
 
 interface Props {
@@ -26,9 +27,7 @@ export function IntegrationSummaryCard({ integration, isSelected, onSelect }: Pr
       <div className="space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-100">
-              <PlugZap className="h-5 w-5" />
-            </div>
+            <IntegrationProviderIcon provider={integration.provider} />
             <div>
               <h3 className="text-sm font-semibold text-white">{integration.displayName}</h3>
               <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">

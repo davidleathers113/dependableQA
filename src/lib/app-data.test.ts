@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_CALL_FILTERS,
   buildCallFilters,
   deriveBillingHealthSummary,
   deriveBillingRunwaySummary,
   filtersToSearchParams,
+  getIntegrationsSummary,
   getBillingPaymentMethodSummaryFromAccount,
   normalizeCallFilters,
 } from "./app-data";
@@ -151,6 +152,85 @@ describe("billing summary helpers", () => {
       description: "Add a payment method and configure wallet funding to enable call processing.",
       actionLabel: "Set up billing",
       actionKind: "setup_billing",
+    });
+  });
+});
+
+describe("integrations summary helpers", () => {
+  it("merges the supported provider catalog with configured rows", async () => {
+    const integrationsRows = [
+      {
+        id: "integration_1",
+        display_name: "Ringba Primary",
+        provider: "ringba",
+        status: "connected",
+        mode: "webhook",
+        last_success_at: null,
+        last_error_at: null,
+        config: {},
+      },
+    ];
+    const eventsRows = [
+      {
+        id: "event_1",
+        integration_id: "integration_1",
+        event_type: "webhook.test.accepted",
+        severity: "info",
+        message: "Test event accepted.",
+        created_at: "2026-04-10T00:00:00.000Z",
+      },
+    ];
+
+    const integrationsQuery = {
+      eq: vi.fn(),
+      order: vi.fn().mockResolvedValue({
+        data: integrationsRows,
+        error: null,
+      }),
+    };
+    integrationsQuery.eq.mockReturnValue(integrationsQuery);
+
+    const eventsQuery = {
+      eq: vi.fn(),
+      order: vi.fn(),
+      limit: vi.fn().mockResolvedValue({
+        data: eventsRows,
+        error: null,
+      }),
+    };
+    eventsQuery.eq.mockReturnValue(eventsQuery);
+    eventsQuery.order.mockReturnValue(eventsQuery);
+
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "integrations") {
+          return {
+            select: vi.fn(() => integrationsQuery),
+          };
+        }
+
+        return {
+          select: vi.fn(() => eventsQuery),
+        };
+      }),
+    };
+
+    const summary = await getIntegrationsSummary(client as never, "org_1");
+
+    expect(summary.integrations.map((integration) => integration.provider)).toEqual([
+      "ringba",
+      "trackdrive",
+      "retreaver",
+    ]);
+    expect(summary.integrations[0]).toMatchObject({
+      id: "integration_1",
+      isConfigured: true,
+      isCatalogPlaceholder: false,
+    });
+    expect(summary.integrations[1]).toMatchObject({
+      provider: "trackdrive",
+      isConfigured: false,
+      isCatalogPlaceholder: true,
     });
   });
 });
