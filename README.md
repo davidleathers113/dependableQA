@@ -69,6 +69,41 @@ netlify dev --target-port 4321
 
 If your browser doesn't navigate to the site automatically, visit [localhost:8888](http://localhost:8888).
 
+## Release Guardrails
+
+Run the full verification gate before shipping changes:
+
+```bash
+npm run ci:verify
+```
+
+This runs:
+
+- `npm run check:env-example`
+- `npm run check:migrations`
+- `npm test`
+- `npm run build`
+
+## Migration Workflow
+
+Treat the SQL files in `supabase/migrations` as the source of truth.
+
+1. Add a new numbered SQL migration in `supabase/migrations`.
+2. Apply that migration to the target Supabase project using the Supabase CLI or the configured Supabase MCP tooling.
+3. Regenerate `supabase/types.ts` after schema changes.
+4. Run `npm run ci:verify` before deploy.
+
+Avoid applying schema-only changes manually in the Supabase UI without also committing a matching migration file.
+
+## Background AI Operations
+
+The AI queue is processed by:
+
+- `netlify/functions/ai-dispatch.ts` for protected manual dispatch
+- `netlify/functions/ai-dispatch-scheduled.ts` for scheduled processing
+
+The scheduled worker is configured in `netlify.toml`, and the manual worker requires `AI_DISPATCH_SHARED_SECRET`.
+
 ## Support
 
 If you get stuck along the way, get help in our [support forums](https://answers.netlify.com/).

@@ -1,7 +1,9 @@
 import * as React from "react";
+import type { AiOperationsSummary } from "../../lib/app-data";
 
 interface Props {
   organizationId: string;
+  initialOperationsSummary: AiOperationsSummary;
 }
 
 interface AssistantMessage {
@@ -18,7 +20,30 @@ const starterPrompts = [
   "How is the wallet balance looking?",
 ];
 
-export default function AiPage({ organizationId }: Props) {
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "—";
+  }
+
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getStatusClassName(status: string) {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "completed") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+  if (normalized === "running") return "border-violet-500/30 bg-violet-500/10 text-violet-200";
+  if (normalized === "claimed") return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  if (normalized === "retry_scheduled" || normalized === "queued") return "border-sky-500/30 bg-sky-500/10 text-sky-200";
+  if (normalized === "failed") return "border-rose-500/30 bg-rose-500/10 text-rose-200";
+  return "border-slate-700 bg-slate-800 text-slate-300";
+}
+
+export default function AiPage({ organizationId, initialOperationsSummary }: Props) {
   const [question, setQuestion] = React.useState("");
   const [messages, setMessages] = React.useState<AssistantMessage[]>([
     {
@@ -31,6 +56,26 @@ export default function AiPage({ organizationId }: Props) {
   ]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState("");
+  const [operationsSummary, setOperationsSummary] = React.useState(initialOperationsSummary);
+  const [isRefreshingOperations, setIsRefreshingOperations] = React.useState(false);
+
+  async function refreshOperations() {
+    setIsRefreshingOperations(true);
+
+    try {
+      const response = await fetch("/api/ai/ops");
+      const payload = (await response.json().catch(() => ({}))) as AiOperationsSummary & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load AI operations.");
+      }
+
+      setOperationsSummary(payload);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to load AI operations.");
+    } finally {
+      setIsRefreshingOperations(false);
+    }
+  }
 
   async function submitQuestion(nextQuestion: string) {
     const trimmedQuestion = nextQuestion.trim();
@@ -86,15 +131,97 @@ export default function AiPage({ organizationId }: Props) {
   }
 
   return (
-    <section className="flex h-[calc(100vh-160px)] flex-col space-y-6">
+    <section className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight text-white">Ask AI</h1>
         <p className="text-sm text-slate-400">
           Narrow operational assistant backed by live organization metrics, imports, reviews, and flag data.
         </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Background AI pipeline health is shown below separately from the conversational assistant.
+        </p>
       </header>
 
-      <div className="flex flex-1 flex-col space-y-6 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 p-6 shadow-xl">
+      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 shadow-xl">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Background AI Operations</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Queue health, retry pressure, and recent AI worker outcomes for this organization.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void refreshOperations()}
+              disabled={isRefreshingOperations}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 disabled:opacity-60"
+            >
+              {isRefreshingOperations ? "Refreshing..." : "Refresh queue"}
+            </button>
+          </div>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+            {[
+              ["Queued", operationsSummary.counts.queued + operationsSummary.counts.retryScheduled],
+              ["Claimed", operationsSummary.counts.claimed],
+              ["Running", operationsSummary.counts.running],
+              ["Failed", operationsSummary.counts.failed],
+              ["Stale", operationsSummary.staleJobs],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p>
+                <p className="mt-2 text-lg font-semibold text-white">{String(value)}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Oldest Pending Job</p>
+              <p className="mt-2 text-sm text-slate-200">{formatDateTime(operationsSummary.oldestPendingAt)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">Last Completed Job</p>
+              <p className="mt-2 text-sm text-slate-200">{formatDateTime(operationsSummary.lastCompletedAt)}</p>
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-3">
+            <h3 className="text-sm font-semibold text-white">Recent Queue Activity</h3>
+            <div className="space-y-3">
+              {operationsSummary.recentJobs.map((job) => (
+                <div key={job.id} className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-white">
+                        {job.jobType} for {job.callerNumber ?? job.callId}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Call started {formatDateTime(job.callStartedAt)} {job.currentDisposition ? `· ${job.currentDisposition}` : ""}
+                      </p>
+                    </div>
+                    <span className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getStatusClassName(job.status)}`}>
+                      {job.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-400">
+                    <span>Attempts {job.attemptCount}/{job.maxAttempts}</span>
+                    <span>Scheduled {formatDateTime(job.scheduledAt)}</span>
+                    <span>Lease {formatDateTime(job.leaseExpiresAt)}</span>
+                  </div>
+                  {job.lastError && (
+                    <p className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                      {job.lastError}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex min-h-[640px] flex-col space-y-6 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/50 p-6 shadow-xl">
         <div className="flex-1 space-y-4 overflow-y-auto">
           {messages.map((message) => (
             <div
@@ -171,6 +298,7 @@ export default function AiPage({ organizationId }: Props) {
               Ask
             </button>
           </form>
+        </div>
         </div>
       </div>
     </section>

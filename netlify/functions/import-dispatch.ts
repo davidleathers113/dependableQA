@@ -1,5 +1,6 @@
 import { getAdminSupabase } from "../../src/lib/supabase/admin-client";
 import { dispatchImportBatch } from "../../src/server/import-dispatch";
+import { getHeaderValue, safeEqualText } from "../../src/server/netlify-request";
 
 function json(statusCode: number, body: Record<string, unknown>) {
   return {
@@ -11,9 +12,28 @@ function json(statusCode: number, body: Record<string, unknown>) {
   };
 }
 
-export async function handler(event: { httpMethod?: string; body?: string | null }) {
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export async function handler(event: {
+  httpMethod?: string;
+  body?: string | null;
+  headers?: Record<string, string | undefined>;
+}) {
   if (event.httpMethod !== "POST") {
     return json(405, { error: "Method not allowed" });
+  }
+
+  const expectedSecret =
+    asString(process.env.IMPORT_DISPATCH_SHARED_SECRET) || asString(process.env.AI_DISPATCH_SHARED_SECRET);
+  if (!expectedSecret) {
+    return json(503, { error: "Import dispatch is not configured." });
+  }
+
+  const providedSecret = getHeaderValue(event.headers, "x-dependableqa-import-dispatch");
+  if (!providedSecret || !safeEqualText(providedSecret, expectedSecret)) {
+    return json(401, { error: "Unauthorized" });
   }
 
   let payload: unknown = {};

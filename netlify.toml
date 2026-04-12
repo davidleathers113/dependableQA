@@ -1,6 +1,12 @@
 [build]
   publish = "dist"
-  command = "npm run build"
+  command = "npm run ci:verify"
+
+[functions]
+  node_bundler = "esbuild"
+
+[functions."ai-dispatch-scheduled"]
+  schedule = "*/2 * * * *"
 
 [template]
   required-extensions = ["supabase"]

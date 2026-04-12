@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../../supabase/types";
+import { insertAuditLog } from "../lib/app-data";
 import { analyzeCall } from "./analyze-call";
 import { transcribeCall } from "./transcribe-call";
 
@@ -7,6 +8,17 @@ type SupabaseAny = SupabaseClient<Database>;
 
 export type AiJobType = "transcription" | "analysis";
 export type AiJobRow = Database["public"]["Tables"]["ai_jobs"]["Row"];
+export interface AiDispatchJobResult {
+  id: string;
+  organizationId: string;
+  callId: string;
+  jobType: string;
+  status: string;
+}
+export interface AiDispatchRunResult {
+  processed: AiDispatchJobResult[];
+  recovered: AiDispatchJobResult[];
+}
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -26,6 +38,39 @@ function getRetryDelayMs(attemptCount: number) {
   if (attemptCount <= 1) return 30_000;
   if (attemptCount === 2) return 120_000;
   return 300_000;
+}
+
+function buildJobResult(job: AiJobRow) {
+  return {
+    id: job.id,
+    organizationId: job.organization_id,
+    callId: job.call_id,
+    jobType: job.job_type,
+    status: job.status,
+  } satisfies AiDispatchJobResult;
+}
+
+async function recordAiJobAudit(
+  client: SupabaseAny,
+  job: AiJobRow,
+  action: string,
+  summary: string,
+  metadata: Json = {}
+) {
+  await insertAuditLog(client, {
+    organizationId: job.organization_id,
+    actorUserId: null,
+    entityType: "call",
+    entityId: job.call_id,
+    action,
+    metadata: {
+      summary,
+      jobId: job.id,
+      jobType: job.job_type,
+      status: job.status,
+      ...asObject(metadata),
+    },
+  });
 }
 
 async function updateCallForQueuedJob(
@@ -288,6 +333,105 @@ export async function claimAiJobs(
   return claimed;
 }
 
+export async function recoverExpiredAiJobs(
+  client: SupabaseAny,
+  options: {
+    limit?: number;
+    jobType?: AiJobType | null;
+  } = {}
+) {
+  const now = new Date().toISOString();
+  let query = client
+    .from("ai_jobs")
+    .select("*")
+    .in("status", ["claimed", "running"])
+    .lte("lease_expires_at", now)
+    .order("lease_expires_at", { ascending: true })
+    .limit(options.limit ?? 10);
+
+  if (options.jobType) {
+    query = query.eq("job_type", options.jobType);
+  }
+
+  const expired = await query;
+  if (expired.error) {
+    throw new Error(expired.error.message);
+  }
+
+  const recovered: AiJobRow[] = [];
+
+  for (const job of expired.data ?? []) {
+    const errorMessage = "AI job lease expired before completion.";
+    const shouldRetry = job.attempt_count < job.max_attempts;
+    const nextStatus = shouldRetry ? "retry_scheduled" : "failed";
+    const update = await client
+      .from("ai_jobs")
+      .update({
+        status: nextStatus,
+        scheduled_at: now,
+        lease_expires_at: null,
+        completed_at: shouldRetry ? null : now,
+        last_error: errorMessage,
+      })
+      .eq("id", job.id)
+      .eq("status", job.status)
+      .select("*")
+      .maybeSingle();
+
+    if (update.error) {
+      throw new Error(update.error.message);
+    }
+
+    if (!update.data) {
+      continue;
+    }
+
+    if (shouldRetry) {
+      await updateCallForFailedJob(
+        client,
+        job.organization_id,
+        job.call_id,
+        job.job_type as AiJobType,
+        "queued",
+        errorMessage
+      );
+      await recordAiJobAudit(
+        client,
+        update.data,
+        "ai.job.lease_recovered",
+        `Recovered an expired ${job.job_type} job and scheduled a retry.`,
+        {
+          previousStatus: job.status,
+          attemptCount: job.attempt_count,
+        }
+      );
+    } else {
+      await updateCallForFailedJob(
+        client,
+        job.organization_id,
+        job.call_id,
+        job.job_type as AiJobType,
+        "failed",
+        errorMessage
+      );
+      await recordAiJobAudit(
+        client,
+        update.data,
+        "ai.job.failed",
+        `Marked an expired ${job.job_type} job as failed after exhausting retries.`,
+        {
+          previousStatus: job.status,
+          attemptCount: job.attempt_count,
+        }
+      );
+    }
+
+    recovered.push(update.data);
+  }
+
+  return recovered;
+}
+
 async function markAiJobRunning(client: SupabaseAny, job: AiJobRow) {
   await updateCallForRunningJob(client, job.organization_id, job.call_id, job.job_type as AiJobType);
 
@@ -306,6 +450,16 @@ async function markAiJobRunning(client: SupabaseAny, job: AiJobRow) {
   if (running.error) {
     throw new Error(running.error.message);
   }
+
+  await recordAiJobAudit(
+    client,
+    running.data,
+    "ai.job.started",
+    `Started ${running.data.job_type} processing.`,
+    {
+      attemptCount: running.data.attempt_count,
+    }
+  );
 
   return running.data;
 }
@@ -326,6 +480,16 @@ async function completeAiJob(client: SupabaseAny, job: AiJobRow) {
   if (result.error) {
     throw new Error(result.error.message);
   }
+
+  await recordAiJobAudit(
+    client,
+    result.data,
+    "ai.job.completed",
+    `Completed ${result.data.job_type} processing.`,
+    {
+      completedAt: result.data.completed_at,
+    }
+  );
 
   return result.data;
 }
@@ -353,6 +517,16 @@ async function failAiJob(client: SupabaseAny, job: AiJobRow, error: unknown) {
     }
 
     await updateCallForFailedJob(client, job.organization_id, job.call_id, job.job_type as AiJobType, "queued", errorMessage);
+    await recordAiJobAudit(
+      client,
+      retry.data,
+      "ai.job.retry_scheduled",
+      `Scheduled a retry for ${retry.data.job_type} processing.`,
+      {
+        errorMessage,
+        attemptCount: job.attempt_count,
+      }
+    );
 
     return retry.data;
   }
@@ -374,6 +548,16 @@ async function failAiJob(client: SupabaseAny, job: AiJobRow, error: unknown) {
   }
 
   await updateCallForFailedJob(client, job.organization_id, job.call_id, job.job_type as AiJobType, "failed", errorMessage);
+  await recordAiJobAudit(
+    client,
+    failed.data,
+    "ai.job.failed",
+    `Failed ${failed.data.job_type} processing.`,
+    {
+      errorMessage,
+      attemptCount: job.attempt_count,
+    }
+  );
 
   return failed.data;
 }
@@ -394,13 +578,17 @@ export async function runAiJobs(
     transcription: options.handlers?.transcription ?? transcribeCall,
     analysis: options.handlers?.analysis ?? analyzeCall,
   };
+  const recoveredJobs = await recoverExpiredAiJobs(client, {
+    limit: options.limit ? options.limit * 2 : 10,
+    jobType: options.jobType,
+  });
   const claimedJobs = await claimAiJobs(client, {
     limit: options.limit,
     leaseMs: options.leaseMs,
     jobType: options.jobType,
   });
 
-  const processed: Array<{ id: string; jobType: string; status: string }> = [];
+  const processed: AiDispatchJobResult[] = [];
 
   for (const claimedJob of claimedJobs) {
     const runningJob = await markAiJobRunning(client, claimedJob);
@@ -427,20 +615,15 @@ export async function runAiJobs(
       }
 
       const completedJob = await completeAiJob(client, runningJob);
-      processed.push({
-        id: completedJob.id,
-        jobType: completedJob.job_type,
-        status: completedJob.status,
-      });
+      processed.push(buildJobResult(completedJob));
     } catch (error) {
       const failedJob = await failAiJob(client, runningJob, error);
-      processed.push({
-        id: failedJob.id,
-        jobType: failedJob.job_type,
-        status: failedJob.status,
-      });
+      processed.push(buildJobResult(failedJob));
     }
   }
 
-  return processed;
+  return {
+    processed,
+    recovered: recoveredJobs.map((job) => buildJobResult(job)),
+  } satisfies AiDispatchRunResult;
 }

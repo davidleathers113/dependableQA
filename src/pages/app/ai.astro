@@ -3,10 +3,17 @@ export const prerender = false;
 import AppLayout from '../../layouts/AppLayout.astro';
 import AiPage from '../../features/ai/AiPage';
 import { requireAppSession } from '../../lib/auth/require-app-session';
+import { getAiOperationsSummary } from '../../lib/app-data';
+import { getAdminSupabase } from '../../lib/supabase/admin-client';
 
 const session = await requireAppSession(Astro);
+const operationsSummary = await getAiOperationsSummary(getAdminSupabase(), session.organization.id);
 ---
 
 <AppLayout title="Ask AI" session={session}>
-  <AiPage client:load organizationId={session.organization.id} />
+  <AiPage
+    client:load
+    organizationId={session.organization.id}
+    initialOperationsSummary={operationsSummary}
+  />
 </AppLayout>

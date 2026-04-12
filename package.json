@@ -8,6 +8,9 @@
     "build": "astro check && astro build",
     "preview": "astro preview",
     "astro": "astro",
+    "check:env-example": "node scripts/check-env-example.mjs",
+    "check:migrations": "node scripts/check-migrations.mjs",
+    "ci:verify": "npm run check:env-example && npm run check:migrations && npm test && npm run build",
     "test": "vitest run",
     "test:watch": "vitest"
   },

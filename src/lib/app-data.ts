@@ -162,6 +162,38 @@ export interface OverviewData {
   recentActivity: Array<{ type: string; message: string; createdAt: string }>;
 }
 
+export interface AiOperationsJobItem {
+  id: string;
+  callId: string;
+  callerNumber: string | null;
+  callStartedAt: string | null;
+  currentDisposition: string | null;
+  jobType: string;
+  status: string;
+  attemptCount: number;
+  maxAttempts: number;
+  priority: number;
+  scheduledAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  leaseExpiresAt: string | null;
+  lastError: string | null;
+}
+
+export interface AiOperationsSummary {
+  counts: {
+    queued: number;
+    retryScheduled: number;
+    claimed: number;
+    running: number;
+    failed: number;
+  };
+  staleJobs: number;
+  oldestPendingAt: string | null;
+  lastCompletedAt: string | null;
+  recentJobs: AiOperationsJobItem[];
+}
+
 export interface ImportBatchSummary {
   id: string;
   filename: string;
@@ -3100,6 +3132,120 @@ export async function setAlertRuleEnabled(
     .eq("id", input.ruleId);
 
   assertNoError(error, "Unable to update alert status.");
+}
+
+async function getAiJobCount(
+  client: SupabaseAny,
+  organizationId: string,
+  status: string | string[],
+  options: { staleOnly?: boolean } = {}
+) {
+  let query = client
+    .from("ai_jobs")
+    .select("id", {
+      count: "exact",
+      head: true,
+    })
+    .eq("organization_id", organizationId);
+
+  if (Array.isArray(status)) {
+    query = query.in("status", status);
+  } else {
+    query = query.eq("status", status);
+  }
+
+  if (options.staleOnly) {
+    query = query.lte("lease_expires_at", new Date().toISOString());
+  }
+
+  const result = await query;
+  assertNoError(result.error, "Unable to load AI job counts.");
+  return result.count ?? 0;
+}
+
+export async function getAiOperationsSummary(
+  client: SupabaseAny,
+  organizationId: string
+): Promise<AiOperationsSummary> {
+  const [
+    queuedCount,
+    retryScheduledCount,
+    claimedCount,
+    runningCount,
+    failedCount,
+    staleJobs,
+    oldestPendingResult,
+    lastCompletedResult,
+    recentJobsResult,
+  ] = await Promise.all([
+    getAiJobCount(client, organizationId, "queued"),
+    getAiJobCount(client, organizationId, "retry_scheduled"),
+    getAiJobCount(client, organizationId, "claimed"),
+    getAiJobCount(client, organizationId, "running"),
+    getAiJobCount(client, organizationId, "failed"),
+    getAiJobCount(client, organizationId, ["claimed", "running"], {
+      staleOnly: true,
+    }),
+    client
+      .from("ai_jobs")
+      .select("scheduled_at")
+      .eq("organization_id", organizationId)
+      .in("status", ["queued", "retry_scheduled"])
+      .order("scheduled_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    client
+      .from("ai_jobs")
+      .select("completed_at")
+      .eq("organization_id", organizationId)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    client
+      .from("ai_jobs")
+      .select("id, call_id, job_type, status, attempt_count, max_attempts, priority, scheduled_at, started_at, completed_at, lease_expires_at, last_error, calls(caller_number, started_at, current_disposition)")
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .limit(12),
+  ]);
+
+  assertNoError(oldestPendingResult.error, "Unable to load pending AI jobs.");
+  assertNoError(lastCompletedResult.error, "Unable to load AI completion history.");
+  assertNoError(recentJobsResult.error, "Unable to load recent AI jobs.");
+
+  return {
+    counts: {
+      queued: queuedCount,
+      retryScheduled: retryScheduledCount,
+      claimed: claimedCount,
+      running: runningCount,
+      failed: failedCount,
+    },
+    staleJobs,
+    oldestPendingAt: asNullableString(oldestPendingResult.data?.scheduled_at),
+    lastCompletedAt: asNullableString(lastCompletedResult.data?.completed_at),
+    recentJobs: ((recentJobsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => {
+      const call = row.calls as Record<string, unknown> | null;
+      return {
+        id: asString(row.id),
+        callId: asString(row.call_id),
+        callerNumber: asNullableString(call?.caller_number),
+        callStartedAt: asNullableString(call?.started_at),
+        currentDisposition: asNullableString(call?.current_disposition),
+        jobType: asString(row.job_type),
+        status: asString(row.status),
+        attemptCount: asNumber(row.attempt_count),
+        maxAttempts: asNumber(row.max_attempts),
+        priority: asNumber(row.priority),
+        scheduledAt: asString(row.scheduled_at),
+        startedAt: asNullableString(row.started_at),
+        completedAt: asNullableString(row.completed_at),
+        leaseExpiresAt: asNullableString(row.lease_expires_at),
+        lastError: asNullableString(row.last_error),
+      } satisfies AiOperationsJobItem;
+    }),
+  };
 }
 
 export async function getAiAssistantAnswer(

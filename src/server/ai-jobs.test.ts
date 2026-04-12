@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { claimAiJobs, enqueueAiJob } from "./ai-jobs";
+import { describe, expect, it, vi } from "vitest";
+
+const { insertAuditLog } = vi.hoisted(() => ({
+  insertAuditLog: vi.fn(),
+}));
+
+vi.mock("../lib/app-data", async () => {
+  const actual = await vi.importActual<typeof import("../lib/app-data")>("../lib/app-data");
+  return {
+    ...actual,
+    insertAuditLog,
+  };
+});
+
+import { claimAiJobs, enqueueAiJob, recoverExpiredAiJobs, runAiJobs } from "./ai-jobs";
 
 type JobRow = {
   id: string;
@@ -355,5 +368,102 @@ describe("ai jobs", () => {
       status: "claimed",
     });
     expect(jobs[0].lease_expires_at).not.toBeNull();
+  });
+
+  it("recovers expired leased jobs and re-queues them when retries remain", async () => {
+    const { client, jobs, calls } = createClient([
+      {
+        id: "job_1",
+        organization_id: "org_1",
+        call_id: "call_1",
+        job_type: "analysis",
+        status: "running",
+        attempt_count: 1,
+        max_attempts: 3,
+        priority: 100,
+        scheduled_at: "2026-04-11T00:00:00.000Z",
+        started_at: "2026-04-11T00:01:00.000Z",
+        completed_at: null,
+        lease_expires_at: "2026-04-11T00:02:00.000Z",
+        dedupe_key: "call_1:analysis",
+        payload_json: {},
+        last_error: null,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+      },
+    ]);
+
+    const recovered = await recoverExpiredAiJobs(client as never, {
+      limit: 5,
+    });
+
+    expect(recovered).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      status: "retry_scheduled",
+      last_error: "AI job lease expired before completion.",
+    });
+    expect(calls.get("call_1")).toMatchObject({
+      analysis_status: "queued",
+      analysis_error: "AI job lease expired before completion.",
+    });
+  });
+
+  it("runs queued jobs and enqueues downstream analysis after transcription", async () => {
+    const { client, jobs, calls } = createClient([
+      {
+        id: "job_1",
+        organization_id: "org_1",
+        call_id: "call_1",
+        job_type: "transcription",
+        status: "queued",
+        attempt_count: 0,
+        max_attempts: 3,
+        priority: 100,
+        scheduled_at: "2026-04-11T00:00:00.000Z",
+        started_at: null,
+        completed_at: null,
+        lease_expires_at: null,
+        dedupe_key: "call_1:transcription",
+        payload_json: {},
+        last_error: null,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await runAiJobs(client as never, {
+      limit: 1,
+      handlers: {
+        transcription: vi.fn(async () => ({
+          transcriptText: "Transcript text",
+          transcriptSegments: [],
+          durationSeconds: 30,
+          modelName: "gpt-4o-transcribe-diarize",
+        })),
+        analysis: vi.fn(async () => ({
+          modelName: "gpt-4.1-mini",
+          summary: "Summary",
+          suggestedDisposition: "qualified",
+          confidence: 0.9,
+          flagCount: 0,
+        })),
+      },
+    });
+
+    expect(result.processed).toHaveLength(1);
+    expect(result.processed[0]).toMatchObject({
+      id: "job_1",
+      jobType: "transcription",
+      status: "completed",
+    });
+    expect(jobs).toHaveLength(2);
+    expect(jobs[1]).toMatchObject({
+      job_type: "analysis",
+      status: "queued",
+    });
+    expect(calls.get("call_1")).toMatchObject({
+      transcription_status: "processing",
+      analysis_status: "queued",
+    });
   });
 });

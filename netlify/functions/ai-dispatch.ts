@@ -65,8 +65,10 @@ export async function handler(event: {
     });
 
     return json(200, {
-      processedCount: processed.length,
-      processed,
+      processedCount: processed.processed.length,
+      recoveredCount: processed.recovered.length,
+      processed: processed.processed,
+      recovered: processed.recovered,
     });
   } catch (error) {
     return json(500, {
