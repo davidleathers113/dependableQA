@@ -1,5 +1,20 @@
 import type { IntegrationCard, IntegrationProvider } from "../../lib/app-data";
 
+interface RingbaPixelUrlOptions {
+  origin?: string;
+  publicIngestKey: string;
+  includePublisher: boolean;
+  includeBuyer: boolean;
+}
+
+function hasRequiredIngressConfig(integration: IntegrationCard) {
+  if (integration.provider === "ringba") {
+    return Boolean(integration.ringba.publicIngestKey);
+  }
+
+  return integration.webhookAuth.secretConfigured;
+}
+
 export type IntegrationHealthState =
   | "healthy"
   | "needs-configuration"
@@ -82,7 +97,7 @@ export function getIntegrationProviderLabel(provider: IntegrationProvider) {
 
 export function getIntegrationSetupModelDescription(provider: IntegrationProvider) {
   if (provider === "ringba") {
-    return "Webhook ingest with signed provider payloads.";
+    return "Public GET pixel ingest with Ringba query-string tags.";
   }
 
   if (provider === "trackdrive") {
@@ -101,11 +116,14 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
     return {
       state: "needs-configuration",
       label: "Not connected",
-      description: "Connect this provider to start receiving signed webhook events.",
+      description:
+        integration.provider === "ringba"
+          ? "Connect this provider to generate the Ringba pixel URL and start receiving call events."
+          : "Connect this provider to start receiving signed webhook events.",
     };
   }
 
-  const hasSecret = integration.webhookAuth.secretConfigured;
+  const hasRequiredConfig = hasRequiredIngressConfig(integration);
   const hasSuccess = Boolean(integration.lastSuccessAt);
   const hasError = Boolean(integration.lastErrorAt);
   const lastEventSeverity = integration.lastEventSeverity ?? "info";
@@ -123,11 +141,14 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
     };
   }
 
-  if (!hasSecret) {
+  if (!hasRequiredConfig) {
     return {
       state: "needs-configuration",
       label: "Needs configuration",
-      description: "Webhook signing is incomplete, so inbound events cannot be trusted yet.",
+      description:
+        integration.provider === "ringba"
+          ? "Ringba pixel setup is incomplete because the public ingest URL is not ready yet."
+          : "Webhook signing is incomplete, so inbound events cannot be trusted yet.",
     };
   }
 
@@ -165,6 +186,45 @@ export function getWebhookEndpointUrl() {
   }
 
   return new URL("/.netlify/functions/integration-ingest", window.location.origin).toString();
+}
+
+export function getPublicAppOrigin() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.location.origin;
+}
+
+export function getRingbaPixelUrl({
+  origin,
+  publicIngestKey,
+  includePublisher,
+  includeBuyer,
+}: RingbaPixelUrlOptions) {
+  const baseUrl = origin
+    ? new URL("/api/integrations/ringba/pixel", origin).toString()
+    : "/api/integrations/ringba/pixel";
+  const queryParts = [
+    `api_key=${publicIngestKey}`,
+    "platform=ringba",
+    "call_id=[Call:InboundCallId]",
+    "caller_number=[Call:InboundPhoneNumber]",
+    "duration_seconds=[tag:CallLength:Total]",
+    "recording_url=[tag:Recording:RecordingUrl]",
+    "campaign_name=[tag:Campaign:Name]",
+    "call_timestamp=[Call:CallConnectionTime]",
+  ];
+
+  if (includePublisher) {
+    queryParts.push("publisher_name=[tag:Publisher:Name]");
+  }
+
+  if (includeBuyer) {
+    queryParts.push("buyer_name=[tag:Buyer:Name]");
+  }
+
+  return `${baseUrl}?${queryParts.join("&")}`;
 }
 
 export function getIntegrationLatestStatusLabel(integration: IntegrationCard) {
@@ -265,9 +325,9 @@ export function getIntegrationSetupSteps(integration: IntegrationCard) {
 
   if (integration.provider === "ringba") {
     return [
-      `Create or update the ${providerLabel} webhook destination with the endpoint shown below.`,
-      `Send the signature in the \`${integration.webhookAuth.headerName}\` header using ${authLabel}. ${prefixText}`,
-      "Trigger a test call or webhook from Ringba, then confirm the first accepted event appears in diagnostics.",
+      `Create a ${providerLabel} recording pixel with the full pixel URL shown below.`,
+      "Ringba pixels use GET query tags, not custom signature headers.",
+      "Add the pixel to each campaign individually, then wait for a real completed call to confirm diagnostics update.",
     ];
   }
 
@@ -296,7 +356,7 @@ export function getIntegrationSetupSteps(integration: IntegrationCard) {
 
 export function getIntegrationSetupDescription(integration: IntegrationCard) {
   if (integration.provider === "ringba") {
-    return "Configure Ringba to send signed webhook payloads to the DependableQA endpoint above. Use the signature header and prefix exactly as shown. After saving your provider settings, send a test event to verify delivery.";
+    return "Configure Ringba to fire a recording pixel to the DependableQA Ringba URL above. The URL already includes the required query-string tags and public ingest key. Add the pixel to each campaign you want to track, then wait for a completed call to verify delivery.";
   }
 
   if (integration.provider === "trackdrive") {
@@ -316,7 +376,9 @@ export function getIntegrationSetupHeading(integration: IntegrationCard) {
 
 export function getIntegrationLatestEventText(integration: IntegrationCard) {
   if (!integration.isConfigured) {
-    return "Connect this provider to start receiving webhook events.";
+    return integration.provider === "ringba"
+      ? "Connect this provider to generate the Ringba pixel URL."
+      : "Connect this provider to start receiving webhook events.";
   }
 
   const health = getIntegrationHealth(integration);
@@ -326,11 +388,15 @@ export function getIntegrationLatestEventText(integration: IntegrationCard) {
   }
 
   if (health.state === "needs-configuration") {
-    return "Webhook security is not fully configured yet.";
+    return integration.provider === "ringba"
+      ? "Ringba pixel setup is not fully configured yet."
+      : "Webhook security is not fully configured yet.";
   }
 
   if (health.state === "awaiting-first-event") {
-    return "Configuration is complete. Waiting for the first webhook event.";
+    return integration.provider === "ringba"
+      ? "Configuration is complete. Waiting for the first Ringba pixel event."
+      : "Configuration is complete. Waiting for the first webhook event.";
   }
 
   if (health.state === "error") {
@@ -338,10 +404,14 @@ export function getIntegrationLatestEventText(integration: IntegrationCard) {
   }
 
   if (integration.recentEvents.length > 0) {
-    return "A recent webhook event was recorded. Open diagnostics for full details.";
+    return integration.provider === "ringba"
+      ? "A recent Ringba pixel event was recorded. Open diagnostics for full details."
+      : "A recent webhook event was recorded. Open diagnostics for full details.";
   }
 
-  return "No webhook events have been recorded yet for this integration.";
+  return integration.provider === "ringba"
+    ? "No Ringba pixel events have been recorded yet for this integration."
+    : "No webhook events have been recorded yet for this integration.";
 }
 
 export function getDiagnosticsSummary(integration: IntegrationCard) {
@@ -379,12 +449,18 @@ export function getDiagnosticsSummaryLine(integration: IntegrationCard) {
   const health = getIntegrationHealth(integration);
 
   if (integration.recentEvents.length === 0) {
-    return "Configuration is complete. Waiting for the first webhook event.";
+    return integration.provider === "ringba"
+      ? "Configuration is complete. Waiting for the first Ringba pixel event."
+      : "Configuration is complete. Waiting for the first webhook event.";
   }
 
   if (health.state === "healthy" || health.state === "awaiting-first-event") {
-    return "Recent webhook events are processing successfully.";
+    return integration.provider === "ringba"
+      ? "Recent Ringba pixel events are processing successfully."
+      : "Recent webhook events are processing successfully.";
   }
 
-  return "Recent webhook events need attention. Review the latest messages below.";
+  return integration.provider === "ringba"
+    ? "Recent Ringba pixel events need attention. Review the latest messages below."
+    : "Recent webhook events need attention. Review the latest messages below.";
 }

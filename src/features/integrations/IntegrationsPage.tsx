@@ -105,15 +105,51 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
     });
   }, []);
 
-  const handleLaunchWizard = React.useCallback((provider: string) => {
-    if (provider === "custom") {
-      return;
-    }
+  const handleLaunchWizard = React.useCallback(
+    async (provider: string) => {
+      if (provider === "custom") {
+        return;
+      }
 
-    setWorkspaceNotice(null);
-    setSelectedProvider(provider);
-    setActiveWizardProvider(provider);
-  }, []);
+      setWorkspaceNotice(null);
+      setSelectedProvider(provider);
+
+      const integration = integrations.find((entry) => entry.provider === provider);
+      if (provider === "ringba" && integration && !integration.isConfigured) {
+        if (!canManage) {
+          setWorkspaceNotice({
+            type: "error",
+            text: "Only owners and admins can create the Ringba integration before guided setup.",
+          });
+          return;
+        }
+
+        try {
+          await createMutation.mutateAsync({
+            provider: integration.provider,
+            displayName: integration.displayName,
+          });
+          const refreshed = await queryClient.fetchQuery({
+            queryKey: ["integrations", organizationId],
+            queryFn: fetchIntegrationsSummary,
+          });
+          const ringbaIntegration = refreshed.integrations.find((entry) => entry.provider === "ringba");
+          if (!ringbaIntegration?.ringba.publicIngestKey) {
+            setWorkspaceNotice({
+              type: "error",
+              text: "Ringba setup could not generate a public ingest key. Try again.",
+            });
+            return;
+          }
+        } catch {
+          return;
+        }
+      }
+
+      setActiveWizardProvider(provider);
+    },
+    [canManage, createMutation, integrations, organizationId, queryClient]
+  );
 
   const handleWizardClose = React.useCallback(() => {
     setActiveWizardProvider(null);
@@ -122,7 +158,7 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
   const handleWizardComplete = React.useCallback(
     async (provider: string) => {
       const integration = integrations.find((entry) => entry.provider === provider);
-      if (integration && !integration.isConfigured && canManage) {
+      if (integration && !integration.isConfigured && canManage && provider !== "ringba") {
         try {
           await createMutation.mutateAsync({
             provider: integration.provider,
@@ -135,7 +171,13 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
 
       setSelectedProvider(provider);
       setActiveWizardProvider(null);
-      setFocusSection("setup");
+      setFocusSection(provider === "ringba" ? "health" : "setup");
+      if (provider === "ringba") {
+        setWorkspaceNotice({
+          type: "success",
+          text: "After a completed Ringba call arrives, diagnostics will update here.",
+        });
+      }
       window.requestAnimationFrame(() => {
         detailRef.current?.focus();
         detailRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });

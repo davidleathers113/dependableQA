@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../../supabase/types";
 import {
+  getPublicIntegrationRingbaConfig,
   getPublicIntegrationWebhookAuth,
+  type PublicIntegrationRingbaConfig,
   type IntegrationWebhookDefaults,
   type PublicIntegrationEvent,
   type PublicIntegrationWebhookAuth,
@@ -343,6 +345,7 @@ export interface IntegrationCard {
   lastEventMessage: string | null;
   lastEventSeverity: string | null;
   webhookAuth: PublicIntegrationWebhookAuth;
+  ringba: PublicIntegrationRingbaConfig;
   recentEvents: PublicIntegrationEvent[];
 }
 
@@ -2586,6 +2589,7 @@ export async function getIntegrationsSummary(
       lastEventMessage: latestByIntegration.get(integrationId)?.message ?? null,
       lastEventSeverity: latestByIntegration.get(integrationId)?.severity ?? null,
       webhookAuth: getPublicIntegrationWebhookAuth(row.config, defaults),
+      ringba: getPublicIntegrationRingbaConfig(row.config),
       recentEvents: recentEventsByIntegration.get(integrationId) ?? [],
     };
   }
@@ -2604,6 +2608,7 @@ export async function getIntegrationsSummary(
       lastEventMessage: null,
       lastEventSeverity: null,
       webhookAuth: getPublicIntegrationWebhookAuth({}, defaults),
+      ringba: getPublicIntegrationRingbaConfig({}),
       recentEvents: [],
     };
   }

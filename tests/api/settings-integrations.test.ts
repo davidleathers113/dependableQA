@@ -359,6 +359,10 @@ describe("/api/settings/integrations", () => {
             secretConfigured: true,
             secretSource: "integration",
           },
+          ringba: {
+            publicIngestKey: "ringba_live_key",
+            minimumDurationSeconds: 30,
+          },
           recentEvents: [],
         },
       ],
@@ -398,6 +402,10 @@ describe("/api/settings/integrations", () => {
           prefix: "sha256=",
           secretConfigured: true,
           secretSource: "integration",
+        },
+        ringba: {
+          publicIngestKey: "ringba_live_key",
+          minimumDurationSeconds: 30,
         },
         recentEvents: [],
       },
@@ -439,6 +447,10 @@ describe("/api/settings/integrations", () => {
             secretConfigured: false,
             secretSource: "none",
           },
+          ringba: {
+            publicIngestKey: "",
+            minimumDurationSeconds: 30,
+          },
           recentEvents: [],
         },
         {
@@ -460,6 +472,10 @@ describe("/api/settings/integrations", () => {
             secretConfigured: false,
             secretSource: "none",
           },
+          ringba: {
+            publicIngestKey: "",
+            minimumDurationSeconds: 30,
+          },
           recentEvents: [],
         },
         {
@@ -480,6 +496,10 @@ describe("/api/settings/integrations", () => {
             prefix: "sha256=",
             secretConfigured: false,
             secretSource: "none",
+          },
+          ringba: {
+            publicIngestKey: "",
+            minimumDurationSeconds: 30,
           },
           recentEvents: [],
         },
@@ -528,8 +548,98 @@ describe("/api/settings/integrations", () => {
           secretConfigured: false,
           secretSource: "none",
         },
+        ringba: {
+          publicIngestKey: "",
+          minimumDurationSeconds: 30,
+        },
         recentEvents: [],
       },
     });
+  });
+
+  it("creates Ringba integrations with a dedicated public ingest key", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client, getInsertedValues } = createIntegrationsAdminClient(
+      {},
+      {
+        existingByProvider: false,
+        insertedId: "integration_ringba",
+        insertedDisplayName: "Ringba Primary",
+      }
+    );
+    getAdminSupabase.mockReturnValue(client);
+    getIntegrationsSummary.mockResolvedValue({
+      integrations: [
+        {
+          id: "integration_ringba",
+          isConfigured: true,
+          isCatalogPlaceholder: false,
+          displayName: "Ringba Primary",
+          provider: "ringba",
+          status: "disconnected",
+          mode: "webhook",
+          lastSuccessAt: null,
+          lastErrorAt: null,
+          lastEventMessage: null,
+          lastEventSeverity: null,
+          webhookAuth: {
+            authType: "hmac-sha256",
+            headerName: "x-dependableqa-signature",
+            prefix: "sha256=",
+            secretConfigured: false,
+            secretSource: "none",
+          },
+          ringba: {
+            publicIngestKey: "ringba_live_key",
+            minimumDurationSeconds: 30,
+          },
+          recentEvents: [],
+        },
+      ],
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create-integration",
+          provider: "ringba",
+          displayName: "Ringba Primary",
+        }),
+      }),
+    }));
+
+    const insertedValues = getInsertedValues();
+    expect(insertedValues).toEqual(expect.objectContaining({
+      organization_id: "org_1",
+      provider: "ringba",
+      display_name: "Ringba Primary",
+      mode: "webhook",
+      status: "disconnected",
+    }));
+    expect(insertedValues?.config).toEqual(expect.objectContaining({
+      webhookAuth: {
+        type: "hmac-sha256",
+        headerName: "x-dependableqa-signature",
+        prefix: "sha256=",
+      },
+      ringba: expect.objectContaining({
+        minimumDurationSeconds: 30,
+      }),
+    }));
+    expect(
+      typeof (insertedValues?.config as { ringba?: { publicIngestKey?: unknown } }).ringba?.publicIngestKey
+    ).toBe("string");
+    expect(
+      ((insertedValues?.config as { ringba?: { publicIngestKey?: string } }).ringba?.publicIngestKey ?? "").startsWith(
+        "ringba_live_"
+      )
+    ).toBe(true);
+
+    expect(response.status).toBe(200);
   });
 });

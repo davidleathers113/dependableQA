@@ -2,6 +2,7 @@ import type { Json } from "../../supabase/types";
 
 export type IntegrationWebhookAuthType = "shared-secret" | "hmac-sha256";
 export type IntegrationWebhookSecretSource = "integration" | "environment" | "none";
+export const DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS = 30;
 
 export interface PublicIntegrationWebhookAuth {
   authType: IntegrationWebhookAuthType;
@@ -9,6 +10,11 @@ export interface PublicIntegrationWebhookAuth {
   prefix: string;
   secretConfigured: boolean;
   secretSource: IntegrationWebhookSecretSource;
+}
+
+export interface PublicIntegrationRingbaConfig {
+  publicIngestKey: string;
+  minimumDurationSeconds: number;
 }
 
 export interface PublicIntegrationEvent {
@@ -32,6 +38,11 @@ export interface IntegrationWebhookAuthInput {
   secret: string;
 }
 
+export interface IntegrationRingbaConfigInput {
+  publicIngestKey?: string;
+  minimumDurationSeconds?: number;
+}
+
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -49,6 +60,29 @@ function cloneRecord(value: unknown) {
 
 function getConfiguredSecret(configRecord: Record<string, unknown>, webhookAuth: Record<string, unknown> | null) {
   return asString(webhookAuth?.secret) || asString(configRecord.signingSecret) || asString(configRecord.sharedSecret);
+}
+
+function getConfiguredRingba(configRecord: Record<string, unknown>) {
+  return asRecord(configRecord.ringba);
+}
+
+function normalizeMinimumDurationSeconds(value: unknown) {
+  const duration = Number(value);
+  if (!Number.isFinite(duration) || duration < 0) {
+    return DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS;
+  }
+
+  return Math.floor(duration);
+}
+
+export function getPublicIntegrationRingbaConfig(config: unknown): PublicIntegrationRingbaConfig {
+  const configRecord = asRecord(config) ?? {};
+  const ringba = getConfiguredRingba(configRecord);
+
+  return {
+    publicIngestKey: asString(ringba?.publicIngestKey),
+    minimumDurationSeconds: normalizeMinimumDurationSeconds(ringba?.minimumDurationSeconds),
+  };
 }
 
 export function getPublicIntegrationWebhookAuth(
@@ -138,5 +172,31 @@ export function normalizeIntegrationWebhookAuthInput(
   delete configRecord.signaturePrefix;
   configRecord.webhookAuth = nextWebhookAuth;
 
+  return configRecord as Json;
+}
+
+export function normalizeIntegrationRingbaConfigInput(
+  existingConfig: unknown,
+  input: IntegrationRingbaConfigInput
+): Json {
+  const configRecord = cloneRecord(existingConfig);
+  const existingRingba = cloneRecord(configRecord.ringba);
+  const nextPublicIngestKey =
+    asString(input.publicIngestKey) || asString(existingRingba.publicIngestKey);
+
+  const nextRingba: Record<string, unknown> = {
+    ...existingRingba,
+    minimumDurationSeconds: normalizeMinimumDurationSeconds(
+      input.minimumDurationSeconds ?? existingRingba.minimumDurationSeconds
+    ),
+  };
+
+  if (nextPublicIngestKey) {
+    nextRingba.publicIngestKey = nextPublicIngestKey;
+  } else {
+    delete nextRingba.publicIngestKey;
+  }
+
+  configRecord.ringba = nextRingba;
   return configRecord as Json;
 }

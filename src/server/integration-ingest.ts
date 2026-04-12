@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json, TablesInsert } from "../../supabase/types";
 import { insertAuditLog, slugify, type IntegrationProvider } from "../lib/app-data";
+import { getPublicIntegrationRingbaConfig } from "../lib/integration-config";
 import { enqueueAiJob } from "./ai-jobs";
 import { createHmacSha256Hex, getHeaderValue, safeEqualText } from "./netlify-request";
 
@@ -220,6 +221,98 @@ export async function loadIntegrationContext(client: SupabaseAny, integrationId:
   }
 
   return toIntegrationRecord((result.data ?? null) as Record<string, unknown> | null);
+}
+
+export async function loadIntegrationContextByRingbaPublicIngestKey(client: SupabaseAny, publicIngestKey: string) {
+  const result = await client
+    .from("integrations")
+    .select("id, organization_id, provider, display_name, config")
+    .eq("provider", "ringba");
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  for (const row of (result.data ?? []) as Array<Record<string, unknown>>) {
+    const integration = toIntegrationRecord(row);
+    if (!integration) {
+      continue;
+    }
+
+    if (getPublicIntegrationRingbaConfig(integration.config).publicIngestKey === publicIngestKey) {
+      return integration;
+    }
+  }
+
+  return null;
+}
+
+function requireQueryValue(searchParams: URLSearchParams, key: string) {
+  const value = asString(searchParams.get(key));
+  if (!value) {
+    throw new Error(`${key} query parameter is required.`);
+  }
+
+  return value;
+}
+
+function parseNonNegativeInteger(value: string, key: string) {
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+    throw new Error(`${key} must be a non-negative number.`);
+  }
+
+  return Math.floor(parsedValue);
+}
+
+export function getRingbaMinimumDurationSeconds(integration: IntegrationContext) {
+  return getPublicIntegrationRingbaConfig(integration.config).minimumDurationSeconds;
+}
+
+export function parseRingbaPixelRequest(requestUrl: URL) {
+  const apiKey = requireQueryValue(requestUrl.searchParams, "api_key");
+  const platform = requireQueryValue(requestUrl.searchParams, "platform");
+  if (platform !== "ringba") {
+    throw new Error("platform must be ringba.");
+  }
+
+  const durationSeconds = parseNonNegativeInteger(
+    requireQueryValue(requestUrl.searchParams, "duration_seconds"),
+    "duration_seconds"
+  );
+
+  const normalizedCall: Record<string, unknown> = {
+    externalCallId: requireQueryValue(requestUrl.searchParams, "call_id"),
+    callerNumber: requireQueryValue(requestUrl.searchParams, "caller_number"),
+    durationSeconds,
+    recordingUrl: requireQueryValue(requestUrl.searchParams, "recording_url"),
+    campaignName: requireQueryValue(requestUrl.searchParams, "campaign_name"),
+    startedAt: requireQueryValue(requestUrl.searchParams, "call_timestamp"),
+  };
+
+  const publisherName = asString(requestUrl.searchParams.get("publisher_name"));
+  if (publisherName) {
+    normalizedCall.publisherName = publisherName;
+  }
+
+  const buyerName = asString(requestUrl.searchParams.get("buyer_name"));
+  if (buyerName) {
+    normalizedCall.buyerName = buyerName;
+  }
+
+  const payload: Record<string, unknown> = {
+    provider: "ringba",
+    platform: "ringba",
+    ingestionMode: "pixel",
+    calls: [normalizedCall],
+  };
+
+  return {
+    apiKey,
+    payload,
+    calls: [normalizedCall],
+    durationSeconds,
+  };
 }
 
 export function parseWebhookPayload(rawBody: string) {

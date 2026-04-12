@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS,
+  getPublicIntegrationRingbaConfig,
   getPublicIntegrationWebhookAuth,
+  normalizeIntegrationRingbaConfigInput,
   normalizeIntegrationWebhookAuthInput,
 } from "./integration-config";
 
@@ -53,6 +56,41 @@ describe("integration-config", () => {
       headerName: "x-webhook-secret",
       prefix: "",
       secret: "legacy-secret",
+    });
+  });
+
+  it("returns a public Ringba config summary with defaults", () => {
+    expect(getPublicIntegrationRingbaConfig({})).toEqual({
+      publicIngestKey: "",
+      minimumDurationSeconds: DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS,
+    });
+  });
+
+  it("normalizes Ringba config without disturbing webhook auth", () => {
+    const nextConfig = normalizeIntegrationRingbaConfigInput(
+      {
+        endpoint: "/.netlify/functions/integration-ingest",
+        webhookAuth: {
+          type: "hmac-sha256",
+          headerName: "x-signature",
+          prefix: "sha256=",
+        },
+      },
+      {
+        publicIngestKey: "ringba_live_key",
+        minimumDurationSeconds: 45,
+      }
+    ) as Record<string, unknown>;
+
+    expect(nextConfig.endpoint).toBe("/.netlify/functions/integration-ingest");
+    expect(nextConfig.webhookAuth).toEqual({
+      type: "hmac-sha256",
+      headerName: "x-signature",
+      prefix: "sha256=",
+    });
+    expect(nextConfig.ringba).toEqual({
+      publicIngestKey: "ringba_live_key",
+      minimumDurationSeconds: 45,
     });
   });
 });

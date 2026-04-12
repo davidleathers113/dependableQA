@@ -226,11 +226,19 @@ describe("integrations summary helpers", () => {
       id: "integration_1",
       isConfigured: true,
       isCatalogPlaceholder: false,
+      ringba: {
+        publicIngestKey: "",
+        minimumDurationSeconds: 30,
+      },
     });
     expect(summary.integrations[1]).toMatchObject({
       provider: "trackdrive",
       isConfigured: false,
       isCatalogPlaceholder: true,
+      ringba: {
+        publicIngestKey: "",
+        minimumDurationSeconds: 30,
+      },
     });
   });
 });

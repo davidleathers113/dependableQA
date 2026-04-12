@@ -6,6 +6,7 @@ import {
   getIntegrationHealth,
   getIntegrationLatestEventText,
   getIntegrationLatestStatusLabel,
+  getRingbaPixelUrl,
   getIntegrationSummaryMeta,
   getSecretSourceLabel,
 } from "./helpers";
@@ -30,6 +31,10 @@ function createIntegration(overrides: Partial<IntegrationCard> = {}): Integratio
       secretConfigured: false,
       secretSource: "none",
     },
+    ringba: {
+      publicIngestKey: "",
+      minimumDurationSeconds: 30,
+    },
     recentEvents: [],
     ...overrides,
   };
@@ -42,7 +47,7 @@ describe("integration helpers", () => {
     expect(health).toEqual({
       state: "needs-configuration",
       label: "Needs configuration",
-      description: "Webhook signing is incomplete, so inbound events cannot be trusted yet.",
+      description: "Ringba pixel setup is incomplete because the public ingest URL is not ready yet.",
     });
   });
 
@@ -56,21 +61,18 @@ describe("integration helpers", () => {
     expect(health).toEqual({
       state: "needs-configuration",
       label: "Not connected",
-      description: "Connect this provider to start receiving signed webhook events.",
+      description: "Connect this provider to generate the Ringba pixel URL and start receiving call events.",
     });
     expect(getIntegrationLatestStatusLabel(integration)).toBe("Not connected yet");
-    expect(getIntegrationLatestEventText(integration)).toBe("Connect this provider to start receiving webhook events.");
+    expect(getIntegrationLatestEventText(integration)).toBe("Connect this provider to generate the Ringba pixel URL.");
     expect(getDiagnosticsSummaryLine(integration)).toBe("Connect this provider to start receiving diagnostics.");
   });
 
   it("derives awaiting first event when auth is ready but no success exists", () => {
     const integration = createIntegration({
-      webhookAuth: {
-        authType: "hmac-sha256",
-        headerName: "x-dependableqa-signature",
-        prefix: "sha256=",
-        secretConfigured: true,
-        secretSource: "integration",
+      ringba: {
+        publicIngestKey: "ringba_live_key",
+        minimumDurationSeconds: 30,
       },
     });
     const health = getIntegrationHealth(integration);
@@ -78,22 +80,19 @@ describe("integration helpers", () => {
     expect(health.state).toBe("awaiting-first-event");
     expect(health.label).toBe("Awaiting first event");
     expect(getIntegrationLatestEventText(integration)).toBe(
-      "Configuration is complete. Waiting for the first webhook event."
+      "Configuration is complete. Waiting for the first Ringba pixel event."
     );
     expect(getDiagnosticsSummaryLine(integration)).toBe(
-      "Configuration is complete. Waiting for the first webhook event."
+      "Configuration is complete. Waiting for the first Ringba pixel event."
     );
   });
 
   it("derives healthy when a secret is configured and a success exists", () => {
     const health = getIntegrationHealth(
       createIntegration({
-        webhookAuth: {
-          authType: "hmac-sha256",
-          headerName: "x-dependableqa-signature",
-          prefix: "sha256=",
-          secretConfigured: true,
-          secretSource: "environment",
+        ringba: {
+          publicIngestKey: "ringba_live_key",
+          minimumDurationSeconds: 30,
         },
         lastSuccessAt: "2026-04-10T00:00:00.000Z",
       })
@@ -160,18 +159,15 @@ describe("integration helpers", () => {
   it("builds summary metadata for the summary card layer", () => {
     const meta = getIntegrationSummaryMeta(
       createIntegration({
-        webhookAuth: {
-          authType: "hmac-sha256",
-          headerName: "x-dependableqa-signature",
-          prefix: "sha256=",
-          secretConfigured: true,
-          secretSource: "integration",
+        ringba: {
+          publicIngestKey: "ringba_live_key",
+          minimumDurationSeconds: 30,
         },
         lastSuccessAt: "2026-04-10T00:00:00.000Z",
       })
     );
 
-    expect(meta.setupModelDescription).toBe("Webhook ingest with signed provider payloads.");
+    expect(meta.setupModelDescription).toBe("Public GET pixel ingest with Ringba query-string tags.");
     expect(meta.latestStatusLabel.startsWith("Last success:")).toBe(true);
     expect(meta.primaryActionLabel).toBe("Reconfigure");
   });
@@ -207,12 +203,9 @@ describe("integration helpers", () => {
 
   it("surfaces recent warning activity when warnings exist without timestamps", () => {
     const integration = createIntegration({
-      webhookAuth: {
-        authType: "hmac-sha256",
-        headerName: "x-dependableqa-signature",
-        prefix: "sha256=",
-        secretConfigured: true,
-        secretSource: "integration",
+      ringba: {
+        publicIngestKey: "ringba_live_key",
+        minimumDurationSeconds: 30,
       },
       recentEvents: [
         {
@@ -228,7 +221,7 @@ describe("integration helpers", () => {
     expect(getIntegrationHealth(integration).state).toBe("degraded");
     expect(getIntegrationLatestStatusLabel(integration)).toBe("Recent warning recorded");
     expect(getDiagnosticsSummaryLine(integration)).toBe(
-      "Recent webhook events need attention. Review the latest messages below."
+      "Recent Ringba pixel events need attention. Review the latest messages below."
     );
   });
 
@@ -246,12 +239,9 @@ describe("integration helpers", () => {
   it("uses a warning-oriented diagnostics summary line for degraded integrations", () => {
     const line = getDiagnosticsSummaryLine(
       createIntegration({
-        webhookAuth: {
-          authType: "hmac-sha256",
-          headerName: "x-dependableqa-signature",
-          prefix: "sha256=",
-          secretConfigured: true,
-          secretSource: "integration",
+        ringba: {
+          publicIngestKey: "ringba_live_key",
+          minimumDurationSeconds: 30,
         },
         lastEventSeverity: "warning",
         recentEvents: [
@@ -266,6 +256,31 @@ describe("integration helpers", () => {
       })
     );
 
-    expect(line).toBe("Recent webhook events need attention. Review the latest messages below.");
+    expect(line).toBe("Recent Ringba pixel events need attention. Review the latest messages below.");
+  });
+
+  it("builds the Ringba pixel URL with publisher on by default", () => {
+    expect(
+      getRingbaPixelUrl({
+        origin: "https://dependableqa.netlify.app",
+        publicIngestKey: "ringba_live_key",
+        includePublisher: true,
+        includeBuyer: false,
+      })
+    ).toBe(
+      "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=[Call:InboundCallId]&caller_number=[Call:InboundPhoneNumber]&duration_seconds=[tag:CallLength:Total]&recording_url=[tag:Recording:RecordingUrl]&campaign_name=[tag:Campaign:Name]&call_timestamp=[Call:CallConnectionTime]&publisher_name=[tag:Publisher:Name]"
+    );
+  });
+
+  it("appends buyer_name only when the Ringba buyer toggle is enabled", () => {
+    const url = getRingbaPixelUrl({
+      origin: "https://dependableqa.netlify.app",
+      publicIngestKey: "ringba_live_key",
+      includePublisher: true,
+      includeBuyer: true,
+    });
+
+    expect(url.includes("&publisher_name=[tag:Publisher:Name]")).toBe(true);
+    expect(url.endsWith("&buyer_name=[tag:Buyer:Name]")).toBe(true);
   });
 });

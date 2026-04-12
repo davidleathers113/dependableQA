@@ -26,7 +26,9 @@ export function IntegrationHealthPanel({ integration }: Props) {
         <div>
           <h3 className="text-lg font-semibold text-white">Health</h3>
           <p className="mt-1 text-sm text-slate-400">
-            Review current readiness before changing setup or webhook security.
+            {integration.provider === "ringba"
+              ? "Review current Ringba pixel readiness before testing campaign delivery."
+              : "Review current readiness before changing setup or webhook security."}
           </p>
         </div>
         <IntegrationStatusBadge state={health.state} label={health.label} />
@@ -35,7 +37,18 @@ export function IntegrationHealthPanel({ integration }: Props) {
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <DetailField label="Status" value={health.label} />
         <DetailField label="Mode" value={integration.mode} />
-        <DetailField label="Webhook auth" value={integration.webhookAuth.secretConfigured ? "Configured" : "Missing"} />
+        <DetailField
+          label={integration.provider === "ringba" ? "Pixel URL" : "Webhook auth"}
+          value={
+            integration.provider === "ringba"
+              ? integration.ringba.publicIngestKey
+                ? "Ready"
+                : "Missing"
+              : integration.webhookAuth.secretConfigured
+                ? "Configured"
+                : "Missing"
+          }
+        />
         <DetailField label="Last success" value={formatIntegrationDateTime(integration.lastSuccessAt)} />
       </div>
 

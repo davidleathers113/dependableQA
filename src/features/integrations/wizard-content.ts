@@ -5,6 +5,20 @@ export interface IntegrationWizardStepContent {
   note?: string;
 }
 
+export interface RingbaWizardStepContent {
+  sectionLabel: string;
+  title: string;
+  description?: string;
+  emphasis?: string;
+  bullets?: string[];
+  codeLabel?: string;
+  showCopyButton?: boolean;
+  showOptionalFieldToggles?: boolean;
+  screenshotSrc?: string;
+  screenshotAlt?: string;
+  note?: string;
+}
+
 export function getTrackDriveApiWizardSteps(subdomain: string): IntegrationWizardStepContent[] {
   const normalizedSubdomain = subdomain.trim();
 
@@ -67,28 +81,91 @@ export function getTrackDriveManualWizardSteps(endpoint: string): IntegrationWiz
   ];
 }
 
-export function getRingbaWizardSteps(endpoint: string): IntegrationWizardStepContent[] {
+export function getRingbaWizardSteps(): RingbaWizardStepContent[] {
   return [
     {
+      sectionLabel: "Step 1: Create the pixel",
       title: "Open Ringba pixels",
       description: "In Ringba, go to Integrations -> Pixels.",
     },
     {
+      sectionLabel: "Step 1: Create the pixel",
       title: "Create a pixel",
-      description: "Create a new pixel named DependableQA so it is easy to recognize later.",
+      description: "Click + Create Pixel, then name it DependableQA or another recognizable label.",
     },
     {
+      sectionLabel: "Step 1: Create the pixel",
       title: "Set the fire condition",
-      description: 'Set "Fire Pixel On" to Recording or the equivalent completed-call event.',
+      description: 'Set "Fire Pixel On" to Recording.',
     },
     {
+      sectionLabel: "Step 1: Create the pixel",
+      title: "Review the optional Ringba fields",
+      description: "Publisher is included by default. Buyer is optional and can be toggled on when you want buyer attribution in DependableQA.",
+      showOptionalFieldToggles: true,
+      note: "Toggling these options updates the full Ringba pixel URL before you copy it.",
+    },
+    {
+      sectionLabel: "Step 1: Create the pixel",
       title: "Copy the complete webhook URL",
-      description: "Ringba expects the full DependableQA webhook destination.",
-      bullets: [`Complete Webhook URL: ${endpoint}`],
+      description: "Use this Ringba-ready URL in the Ringba URL field.",
+      codeLabel: "Complete Webhook URL",
+      showCopyButton: true,
+      emphasis: "This URL already includes the public ingest key plus the required Ringba query-string placeholders.",
     },
     {
+      sectionLabel: "Step 1: Create the pixel",
       title: "Paste the URL into Ringba",
-      description: "Paste the complete webhook URL into the Ringba pixel destination and save.",
+      description: "Paste the complete webhook URL into the Ringba URL field.",
+    },
+    {
+      sectionLabel: "Step 1: Create the pixel",
+      title: "Add the default tag filter",
+      description: "Set the filter so DependableQA only receives calls after a connected duration threshold.",
+      bullets: ["Call", "Call Length", "From Connect", "Greater Than", "30"],
+      emphasis: "This matches the recommended 30-second minimum for qualified call review.",
+    },
+    {
+      sectionLabel: "Step 1: Create the pixel",
+      title: "Create the pixel",
+      description: "Click Create to save the Ringba pixel.",
+    },
+    {
+      sectionLabel: "Step 2: Add pixel to campaigns",
+      title: "Remember the campaign requirement",
+      description: "Ringba pixels must be added to each campaign individually.",
+      note: "Creating the pixel does not automatically attach it to your campaigns.",
+    },
+    {
+      sectionLabel: "Step 2: Add pixel to campaigns",
+      title: "Open campaign tracking pixels",
+      description: "Go to Campaigns -> [Your Campaign] -> Tracking Pixels.",
+    },
+    {
+      sectionLabel: "Step 2: Add pixel to campaigns",
+      title: "Add the existing DependableQA pixel",
+      description: "Click Add Pixel -> Select Existing, then choose the DependableQA pixel you just created.",
+    },
+    {
+      sectionLabel: "Step 2: Add pixel to campaigns",
+      title: "Keep the 30-second minimum on the pixel",
+      description: "You do not need to recreate the duration rule at the campaign level because it already lives on the pixel itself.",
+    },
+    {
+      sectionLabel: "Step 2: Add pixel to campaigns",
+      title: "Repeat for each campaign you want to track",
+      description: "Attach the pixel to every Ringba campaign that should send calls into DependableQA.",
+    },
+    {
+      sectionLabel: "Step 3: Test",
+      title: "Wait for a real completed call, then test connection",
+      description: "Ringba does not provide a test-fire button for this pixel flow.",
+      bullets: [
+        "Call the DID yourself, or wait for a real call.",
+        "After the call completes, return to DependableQA.",
+        "Use Test Connection to check whether diagnostics have updated.",
+      ],
+      emphasis: "If Ringba included a recording URL, DependableQA will queue transcription automatically after ingest.",
     },
   ];
 }

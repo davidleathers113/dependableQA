@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { randomBytes } from "node:crypto";
 import {
   getIntegrationsSummary,
   insertAuditLog,
@@ -8,6 +9,7 @@ import {
 import { requireApiSession } from "../../../lib/auth/request-session";
 import { getAdminSupabase } from "../../../lib/supabase/admin-client";
 import {
+  normalizeIntegrationRingbaConfigInput,
   normalizeIntegrationWebhookAuthInput,
   type IntegrationWebhookAuthType,
 } from "../../../lib/integration-config";
@@ -64,6 +66,10 @@ function getSummaryDefaults() {
     fallbackHeaderName: env.INTEGRATION_INGEST_SIGNATURE_HEADER,
     fallbackPrefix: env.INTEGRATION_INGEST_SIGNATURE_PREFIX,
   };
+}
+
+function createRingbaPublicIngestKey() {
+  return `ringba_live_${randomBytes(18).toString("hex")}`;
 }
 
 export const GET: APIRoute = async (context) => {
@@ -134,6 +140,12 @@ export const POST: APIRoute = async (context) => {
           secret: "",
         }
       );
+      const finalConfig =
+        provider === "ringba"
+          ? normalizeIntegrationRingbaConfigInput(nextConfig, {
+              publicIngestKey: createRingbaPublicIngestKey(),
+            })
+          : nextConfig;
 
       const insertValues: TablesInsert<"integrations"> = {
         organization_id: session.organization.id,
@@ -141,7 +153,7 @@ export const POST: APIRoute = async (context) => {
         display_name: displayName,
         mode: catalogEntry?.defaultMode || "webhook",
         status: "disconnected",
-        config: nextConfig,
+        config: finalConfig,
       };
 
       const created = await admin.from("integrations").insert(insertValues).select("id, display_name").single();

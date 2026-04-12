@@ -19,7 +19,7 @@ vi.mock("./ai-jobs", () => ({
   enqueueAiJob,
 }));
 
-import { ingestIntegrationCalls, type IntegrationContext } from "./integration-ingest";
+import { ingestIntegrationCalls, parseRingbaPixelRequest, type IntegrationContext } from "./integration-ingest";
 
 function createIntegration(): IntegrationContext {
   return {
@@ -129,5 +129,45 @@ describe("ingestIntegrationCalls", () => {
         language: "en",
       },
     });
+  });
+});
+
+describe("parseRingbaPixelRequest", () => {
+  it("normalizes Ringba query params into the shared call shape", () => {
+    const parsed = parseRingbaPixelRequest(
+      new URL(
+        "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=2026-04-11T00%3A00%3A00.000Z&publisher_name=PubOne&buyer_name=BuyerOne"
+      )
+    );
+
+    expect(parsed.apiKey).toBe("ringba_live_key");
+    expect(parsed.durationSeconds).toBe(61);
+    expect(parsed.payload).toEqual({
+      provider: "ringba",
+      platform: "ringba",
+      ingestionMode: "pixel",
+      calls: [
+        {
+          externalCallId: "call_123",
+          callerNumber: "+15555550123",
+          durationSeconds: 61,
+          recordingUrl: "https://example.com/recording.mp3",
+          campaignName: "Alpha",
+          startedAt: "2026-04-11T00:00:00.000Z",
+          publisherName: "PubOne",
+          buyerName: "BuyerOne",
+        },
+      ],
+    });
+  });
+
+  it("rejects unsupported platforms", () => {
+    expect(() =>
+      parseRingbaPixelRequest(
+        new URL(
+          "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=retreaver&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=2026-04-11T00%3A00%3A00.000Z"
+        )
+      )
+    ).toThrow("platform must be ringba.");
   });
 });

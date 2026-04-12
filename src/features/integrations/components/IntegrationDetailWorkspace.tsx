@@ -35,19 +35,30 @@ export function IntegrationDetailWorkspace({
   const canManage = currentUserRole === "owner" || currentUserRole === "admin";
   const [errorMessage, setErrorMessage] = React.useState("");
   const [successMessage, setSuccessMessage] = React.useState("");
+  const [highlightHealth, setHighlightHealth] = React.useState(false);
   const [highlightSetup, setHighlightSetup] = React.useState(false);
+  const healthPanelRef = React.useRef<HTMLDivElement | null>(null);
   const setupPanelRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
-    if (focusSection !== "setup") {
+    if (!focusSection) {
       return;
     }
 
-    setHighlightSetup(true);
+    if (focusSection === "health") {
+      setHighlightHealth(true);
+    } else {
+      setHighlightSetup(true);
+    }
     window.requestAnimationFrame(() => {
-      setupPanelRef.current?.focus();
+      if (focusSection === "health") {
+        healthPanelRef.current?.focus();
+      } else {
+        setupPanelRef.current?.focus();
+      }
     });
     const timeout = window.setTimeout(() => {
+      setHighlightHealth(false);
       setHighlightSetup(false);
       onFocusHandled();
     }, 2600);
@@ -141,8 +152,9 @@ export function IntegrationDetailWorkspace({
             </div>
           </div>
           <p className="max-w-xl text-sm text-slate-400">
-            Configure webhook security, copy setup values, validate the integration, and troubleshoot recent inbound
-            activity from one workspace.
+            {integration.provider === "ringba"
+              ? "Copy the Ringba pixel URL, validate inbound event health, and troubleshoot recent activity from one workspace."
+              : "Configure webhook security, copy setup values, validate the integration, and troubleshoot recent inbound activity from one workspace."}
           </p>
         </div>
         {!integration.isConfigured ? (
@@ -174,7 +186,17 @@ export function IntegrationDetailWorkspace({
         ) : null}
       </div>
 
-      <IntegrationHealthPanel integration={integration} />
+      <div
+        ref={healthPanelRef}
+        tabIndex={-1}
+        className={`rounded-[1.1rem] outline-none transition-all duration-300 ${
+          highlightHealth
+            ? "bg-violet-500/5 shadow-[0_0_0_1px_rgba(139,92,246,0.65),0_0_0_8px_rgba(139,92,246,0.08),0_0_48px_rgba(139,92,246,0.18)]"
+            : ""
+        }`}
+      >
+        <IntegrationHealthPanel integration={integration} />
+      </div>
       <div
         ref={setupPanelRef}
         tabIndex={-1}
@@ -193,14 +215,16 @@ export function IntegrationDetailWorkspace({
           onLaunchWizard={onLaunchWizard}
         />
       </div>
-      <IntegrationSecurityPanel
-        canManage={canManage}
-        integration={integration}
-        isSaving={updateMutation.isPending}
-        isCreating={isCreatingIntegration}
-        onCreateIntegration={onCreateIntegration}
-        onSave={(input) => updateMutation.mutate(input)}
-      />
+      {integration.provider !== "ringba" ? (
+        <IntegrationSecurityPanel
+          canManage={canManage}
+          integration={integration}
+          isSaving={updateMutation.isPending}
+          isCreating={isCreatingIntegration}
+          onCreateIntegration={onCreateIntegration}
+          onSave={(input) => updateMutation.mutate(input)}
+        />
+      ) : null}
       <IntegrationDiagnosticsPanel integration={integration} />
     </section>
   );
