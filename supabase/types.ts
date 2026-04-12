@@ -256,6 +256,81 @@ export type Database = {
           },
         ]
       }
+      ai_jobs: {
+        Row: {
+          attempt_count: number
+          call_id: string
+          completed_at: string | null
+          created_at: string
+          dedupe_key: string
+          id: string
+          job_type: string
+          last_error: string | null
+          lease_expires_at: string | null
+          max_attempts: number
+          organization_id: string
+          payload_json: Json
+          priority: number
+          scheduled_at: string
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          call_id: string
+          completed_at?: string | null
+          created_at?: string
+          dedupe_key: string
+          id?: string
+          job_type: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          max_attempts?: number
+          organization_id: string
+          payload_json?: Json
+          priority?: number
+          scheduled_at?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          call_id?: string
+          completed_at?: string | null
+          created_at?: string
+          dedupe_key?: string
+          id?: string
+          job_type?: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          max_attempts?: number
+          organization_id?: string
+          payload_json?: Json
+          priority?: number
+          scheduled_at?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_jobs_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_jobs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       call_analyses: {
         Row: {
           analysis_version: string
@@ -268,8 +343,12 @@ export type Database = {
           model_name: string
           organization_id: string
           processing_ms: number | null
+          prompt_version: string | null
+          raw_response_json: Json | null
+          schema_version: string | null
           structured_output: Json
           summary: string | null
+          usage_json: Json | null
         }
         Insert: {
           analysis_version: string
@@ -282,8 +361,12 @@ export type Database = {
           model_name: string
           organization_id: string
           processing_ms?: number | null
+          prompt_version?: string | null
+          raw_response_json?: Json | null
+          schema_version?: string | null
           structured_output?: Json
           summary?: string | null
+          usage_json?: Json | null
         }
         Update: {
           analysis_version?: string
@@ -296,8 +379,12 @@ export type Database = {
           model_name?: string
           organization_id?: string
           processing_ms?: number | null
+          prompt_version?: string | null
+          raw_response_json?: Json | null
+          schema_version?: string | null
           structured_output?: Json
           summary?: string | null
+          usage_json?: Json | null
         }
         Relationships: [
           {
@@ -493,37 +580,58 @@ export type Database = {
           call_id: string
           confidence: number | null
           created_at: string
+          duration_seconds: number | null
           id: string
           language: string
+          model_name: string | null
           organization_id: string
+          provider: string | null
+          raw_response_json: Json | null
+          response_format: string | null
           search_document: unknown
+          transcription_version: string | null
           transcript_segments: Json
           transcript_text: string
           updated_at: string
+          usage_json: Json | null
         }
         Insert: {
           call_id: string
           confidence?: number | null
           created_at?: string
+          duration_seconds?: number | null
           id?: string
           language?: string
+          model_name?: string | null
           organization_id: string
+          provider?: string | null
+          raw_response_json?: Json | null
+          response_format?: string | null
           search_document?: unknown
+          transcription_version?: string | null
           transcript_segments?: Json
           transcript_text: string
           updated_at?: string
+          usage_json?: Json | null
         }
         Update: {
           call_id?: string
           confidence?: number | null
           created_at?: string
+          duration_seconds?: number | null
           id?: string
           language?: string
+          model_name?: string | null
           organization_id?: string
+          provider?: string | null
+          raw_response_json?: Json | null
+          response_format?: string | null
           search_document?: unknown
+          transcription_version?: string | null
           transcript_segments?: Json
           transcript_text?: string
           updated_at?: string
+          usage_json?: Json | null
         }
         Relationships: [
           {
@@ -544,6 +652,9 @@ export type Database = {
       }
       calls: {
         Row: {
+          analysis_completed_at: string | null
+          analysis_error: string | null
+          analysis_started_at: string | null
           analysis_status: string
           caller_number: string
           campaign_id: string | null
@@ -568,9 +679,16 @@ export type Database = {
           source_provider: Database["public"]["Enums"]["integration_provider"]
           source_status: string
           started_at: string
+          transcription_completed_at: string | null
+          transcription_error: string | null
+          transcription_started_at: string | null
+          transcription_status: string
           updated_at: string
         }
         Insert: {
+          analysis_completed_at?: string | null
+          analysis_error?: string | null
+          analysis_started_at?: string | null
           analysis_status?: string
           caller_number: string
           campaign_id?: string | null
@@ -595,9 +713,16 @@ export type Database = {
           source_provider: Database["public"]["Enums"]["integration_provider"]
           source_status?: string
           started_at: string
+          transcription_completed_at?: string | null
+          transcription_error?: string | null
+          transcription_started_at?: string | null
+          transcription_status?: string
           updated_at?: string
         }
         Update: {
+          analysis_completed_at?: string | null
+          analysis_error?: string | null
+          analysis_started_at?: string | null
           analysis_status?: string
           caller_number?: string
           campaign_id?: string | null
@@ -622,6 +747,10 @@ export type Database = {
           source_provider?: Database["public"]["Enums"]["integration_provider"]
           source_status?: string
           started_at?: string
+          transcription_completed_at?: string | null
+          transcription_error?: string | null
+          transcription_started_at?: string | null
+          transcription_status?: string
           updated_at?: string
         }
         Relationships: [

@@ -21,9 +21,10 @@ describe("NewImportCard", () => {
     );
 
     expect(html.includes("Import calls")).toBe(true);
-    expect(html.includes("We auto-detect TrackDrive, Ringba, and Retreaver reports.")).toBe(true);
+    expect(html.includes("Auto-detect is on for Ringba, TrackDrive, and Retreaver.")).toBe(true);
     expect(html.includes("Drop a CSV file here, or browse")).toBe(true);
-    expect(html.includes("Duplicate filenames may fail if the storage path already exists.")).toBe(true);
+    expect(html.includes("Field guide")).toBe(true);
+    expect(html.includes("Custom format")).toBe(false);
   });
 
   it("renders manual recovery controls when auto-detect is not confident", () => {
@@ -43,8 +44,9 @@ describe("NewImportCard", () => {
       />
     );
 
-    expect(html.includes("Choose one manually to continue")).toBe(true);
-    expect(html.includes("Continue import")).toBe(true);
-    expect(html.includes("mystery.csv")).toBe(true);
+    expect(html.includes("Choose the provider and continue")).toBe(true);
+    expect(html.includes("Continue with selected provider")).toBe(true);
+    expect(html.includes("Selected file: mystery.csv")).toBe(true);
+    expect(html.includes("Ringba format")).toBe(true);
   });
 });

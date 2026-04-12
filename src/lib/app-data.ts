@@ -88,13 +88,21 @@ export interface CallDetail {
   importBatchId: string | null;
   importBatchFilename: string | null;
   sourceStatus: string;
+  transcriptionStatus: string;
+  transcriptionError: string | null;
   transcriptText: string | null;
+  transcriptModelName: string | null;
+  transcriptVersion: string | null;
+  transcriptUpdatedAt: string | null;
   transcriptSegments: Array<{ speaker: string; text: string; start?: number; end?: number }>;
+  analysisStatus: string;
+  analysisError: string | null;
   analysisSummary: string | null;
   suggestedDisposition: string | null;
   analysisConfidence: number | null;
   analysisModelName: string | null;
   analysisVersion: string | null;
+  analysisCreatedAt: string | null;
   analysisStructuredOutput: Json | null;
   latestReviewNotes: string | null;
   latestReviewedByName: string | null;
@@ -1430,13 +1438,13 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
   const [callResult, transcriptResult, analysisResult, flagsResult, reviewsResult, overridesResult, auditResult] = await Promise.all([
     client
       .from("calls")
-      .select("id, caller_number, destination_number, started_at, ended_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, source_status, campaigns(name), publishers(name), import_batches(filename)")
+      .select("id, caller_number, destination_number, started_at, ended_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, source_status, transcription_status, transcription_error, analysis_status, analysis_error, campaigns(name), publishers(name), import_batches(filename)")
       .eq("organization_id", organizationId)
       .eq("id", callId)
       .single(),
     client
       .from("call_transcripts")
-      .select("transcript_text, transcript_segments")
+      .select("transcript_text, transcript_segments, model_name, transcription_version, updated_at")
       .eq("organization_id", organizationId)
       .eq("call_id", callId)
       .maybeSingle(),
@@ -1600,13 +1608,21 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
     importBatchId: asNullableString(call.import_batch_id),
     importBatchFilename: asNullableString(importBatch?.filename),
     sourceStatus: asString(call.source_status) || "received",
+    transcriptionStatus: asString(call.transcription_status) || "pending",
+    transcriptionError: asNullableString(call.transcription_error),
     transcriptText: asNullableString(transcript?.transcript_text),
+    transcriptModelName: asNullableString(transcript?.model_name),
+    transcriptVersion: asNullableString(transcript?.transcription_version),
+    transcriptUpdatedAt: asNullableString(transcript?.updated_at),
     transcriptSegments: parseSegments(transcript?.transcript_segments),
+    analysisStatus: asString(call.analysis_status) || "pending",
+    analysisError: asNullableString(call.analysis_error),
     analysisSummary: asNullableString(analysis?.summary),
     suggestedDisposition: asNullableString(analysis?.disposition_suggested),
     analysisConfidence: analysis ? asNumber(analysis.confidence) : null,
     analysisModelName: asNullableString(analysis?.model_name),
     analysisVersion: asNullableString(analysis?.analysis_version),
+    analysisCreatedAt: asNullableString(analysis?.created_at),
     analysisStructuredOutput: analysis?.structured_output ? (analysis.structured_output as Json) : null,
     latestReviewNotes: latestReview ? asNullableString(latestReview.review_notes) : null,
     latestReviewedByName: getDisplayName((latestReviewerProfileResult?.data ?? null) as Record<string, unknown> | null),

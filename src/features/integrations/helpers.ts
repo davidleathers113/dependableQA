@@ -100,8 +100,8 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
   if (!integration.isConfigured || integration.isCatalogPlaceholder) {
     return {
       state: "needs-configuration",
-      label: "Needs configuration",
-      description: "This provider has not been configured yet.",
+      label: "Not connected",
+      description: "Connect this provider to start receiving signed webhook events.",
     };
   }
 
@@ -109,8 +109,13 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
   const hasSuccess = Boolean(integration.lastSuccessAt);
   const hasError = Boolean(integration.lastErrorAt);
   const lastEventSeverity = integration.lastEventSeverity ?? "info";
+  const hasRecentErrorEvent = integration.recentEvents.some((event) => event.severity === "error");
+  const hasRecentWarningEvent = integration.recentEvents.some((event) => event.severity === "warning");
+  const hasRecentSuccessEvent = integration.recentEvents.some(
+    (event) => event.severity !== "error" && event.severity !== "warning"
+  );
 
-  if (integration.status === "error" || lastEventSeverity === "error") {
+  if (integration.status === "error" || lastEventSeverity === "error" || hasRecentErrorEvent) {
     return {
       state: "error",
       label: "Error",
@@ -126,7 +131,12 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
     };
   }
 
-  if (integration.status === "degraded" || lastEventSeverity === "warning" || (hasError && !hasSuccess)) {
+  if (
+    integration.status === "degraded" ||
+    lastEventSeverity === "warning" ||
+    hasRecentWarningEvent ||
+    (hasError && !hasSuccess && !hasRecentSuccessEvent)
+  ) {
     return {
       state: "degraded",
       label: "Degraded",
@@ -134,7 +144,7 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
     };
   }
 
-  if (!hasSuccess) {
+  if (!hasSuccess && !hasRecentSuccessEvent) {
     return {
       state: "awaiting-first-event",
       label: "Awaiting first event",
@@ -159,7 +169,7 @@ export function getWebhookEndpointUrl() {
 
 export function getIntegrationLatestStatusLabel(integration: IntegrationCard) {
   if (!integration.isConfigured) {
-    return "No events received yet";
+    return "Not connected yet";
   }
 
   const lastErrorTime = integration.lastErrorAt ? new Date(integration.lastErrorAt).getTime() : Number.NaN;
@@ -176,6 +186,15 @@ export function getIntegrationLatestStatusLabel(integration: IntegrationCard) {
   }
 
   if (integration.recentEvents.length > 0) {
+    const latestEvent = integration.recentEvents[0];
+    if (latestEvent?.severity === "error") {
+      return "Recent error recorded";
+    }
+
+    if (latestEvent?.severity === "warning") {
+      return "Recent warning recorded";
+    }
+
     return "Recent event recorded";
   }
 
@@ -297,7 +316,7 @@ export function getIntegrationSetupHeading(integration: IntegrationCard) {
 
 export function getIntegrationLatestEventText(integration: IntegrationCard) {
   if (!integration.isConfigured) {
-    return "This provider has not been configured yet.";
+    return "Connect this provider to start receiving webhook events.";
   }
 
   const health = getIntegrationHealth(integration);
@@ -311,11 +330,15 @@ export function getIntegrationLatestEventText(integration: IntegrationCard) {
   }
 
   if (health.state === "awaiting-first-event") {
-    return "Configuration saved. Waiting for the first provider event.";
+    return "Configuration is complete. Waiting for the first webhook event.";
   }
 
   if (health.state === "error") {
     return "Recent integration events failed. Review diagnostics below.";
+  }
+
+  if (integration.recentEvents.length > 0) {
+    return "A recent webhook event was recorded. Open diagnostics for full details.";
   }
 
   return "No webhook events have been recorded yet for this integration.";
@@ -350,13 +373,13 @@ export function getDiagnosticsSummary(integration: IntegrationCard) {
 
 export function getDiagnosticsSummaryLine(integration: IntegrationCard) {
   if (!integration.isConfigured) {
-    return "No webhook events have been recorded yet for this integration.";
+    return "Connect this provider to start receiving diagnostics.";
   }
 
   const health = getIntegrationHealth(integration);
 
   if (integration.recentEvents.length === 0) {
-    return "No webhook events have been recorded yet for this integration.";
+    return "Configuration is complete. Waiting for the first webhook event.";
   }
 
   if (health.state === "healthy" || health.state === "awaiting-first-event") {

@@ -13,8 +13,8 @@ export function ImportHelperStrip({ mode, onModeChange, onOpenGuide }: Props) {
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-sm">
       <p className="text-slate-300">
         {isAuto
-          ? "We auto-detect TrackDrive, Ringba, and Retreaver reports."
-          : "Manual mode is on. Choose the provider format before uploading."}
+          ? "Auto-detect is on for Ringba, TrackDrive, and Retreaver."
+          : "Choose the provider format before continuing."}
       </p>
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <button
@@ -22,14 +22,14 @@ export function ImportHelperStrip({ mode, onModeChange, onOpenGuide }: Props) {
           onClick={onOpenGuide}
           className="font-semibold text-violet-300 transition-colors hover:text-violet-200"
         >
-          What fields do we detect?
+          Field guide
         </button>
         <button
           type="button"
           onClick={() => onModeChange(isAuto ? "manual" : "auto")}
           className="font-semibold text-slate-300 transition-colors hover:text-white"
         >
-          {isAuto ? "Choose provider manually" : "Use auto-detect instead"}
+          {isAuto ? "Choose provider" : "Use auto-detect"}
         </button>
       </div>
     </div>

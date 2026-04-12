@@ -46,7 +46,7 @@ export function NewImportCard({
     <section className="rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl">
       <div className="space-y-1">
         <h2 className="text-lg font-semibold text-white">Import calls</h2>
-        <p className="text-sm text-slate-400">Drop a CSV file here or browse to create a new import batch.</p>
+        <p className="text-sm text-slate-400">Drop a CSV file here or browse to create a new batch.</p>
       </div>
 
       <div className="mt-5 space-y-4">
@@ -79,16 +79,16 @@ export function NewImportCard({
             {pendingFileName ? (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
                 <p className="text-sm font-semibold text-amber-100">
-                  We couldn't confidently detect the provider format. Choose one manually to continue.
+                  We couldn't identify this CSV with enough confidence. Choose the provider and continue.
                 </p>
-                <p className="mt-1 text-sm text-amber-200/90">{pendingFileName}</p>
+                <p className="mt-1 text-sm text-amber-200/90">Selected file: {pendingFileName}</p>
                 <button
                   type="button"
                   onClick={onContinuePendingFile}
                   disabled={isUploading}
                   className="mt-3 inline-flex rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 transition-colors hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Continue import
+                  Continue with selected provider
                 </button>
               </div>
             ) : null}
@@ -100,20 +100,18 @@ export function NewImportCard({
         <ImportStatusNotice phase={uploadPhase} error={errorState} successMessage={successMessage} />
 
         {duplicateWarning ? (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
             {duplicateWarning}
           </div>
         ) : null}
 
-        <ImportProviderHint
-          mode={mode}
-          provider={selectedProvider}
-          onOpenGuide={() => setIsGuideOpen(true)}
-        />
-
-        <div className="border-t border-slate-800 pt-3 text-sm text-slate-500">
-          Duplicate filenames may fail if the storage path already exists.
-        </div>
+        {mode === "manual" ? (
+          <ImportProviderHint
+            mode={mode}
+            provider={selectedProvider}
+            onOpenGuide={() => setIsGuideOpen(true)}
+          />
+        ) : null}
       </div>
     </section>
   );

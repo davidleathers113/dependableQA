@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import { formatDuration, getCallDetail, type CallDetail } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
+import { getAiEmptyState, getAiStatusClassName, getAiStatusLabel } from "./ai-status";
 import { CallReviewActions } from "./components/CallReviewActions";
 import { useCallReviewMutation } from "./useCallReviewMutation";
 
@@ -197,13 +198,26 @@ function CallDetailPageInner({ organizationId, callId, initialData }: Props) {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Overview</p>
                 <h2 className="mt-1 text-lg font-semibold text-white">AI Summary And Reviewer Context</h2>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.transcriptionStatus)}`}>
+                  Transcript: {getAiStatusLabel(detail.transcriptionStatus)}
+                </span>
+                <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.analysisStatus)}`}>
+                  Analysis: {getAiStatusLabel(detail.analysisStatus)}
+                </span>
+              </div>
               <p className="text-sm leading-6 text-slate-300">
-                {detail.analysisSummary ?? "No AI analysis has been stored yet."}
+                {detail.analysisSummary ?? getAiEmptyState("analysis", detail.analysisStatus, detail.analysisError)}
               </p>
               {detail.suggestedDisposition && (
                 <p className="text-xs uppercase tracking-wider text-violet-400">
                   Suggested disposition: {detail.suggestedDisposition}
                 </p>
+              )}
+              {(detail.transcriptionError || detail.analysisError) && (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  {detail.analysisError ?? detail.transcriptionError}
+                </div>
               )}
               {detail.latestReviewNotes && (
                 <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
@@ -220,13 +234,22 @@ function CallDetailPageInner({ organizationId, callId, initialData }: Props) {
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Transcript</p>
                   <h2 className="mt-1 text-lg font-semibold text-white">Evidence Review</h2>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {detail.transcriptModelName ?? "No transcription model stored"}
+                    {detail.transcriptVersion ? ` · ${detail.transcriptVersion}` : ""}
+                  </p>
                 </div>
-                <input
-                  value={transcriptQuery}
-                  onChange={(event) => setTranscriptQuery(event.target.value)}
-                  placeholder="Search transcript..."
-                  className="w-full max-w-xs rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-violet-500"
-                />
+                <div className="flex w-full max-w-md items-center gap-3">
+                  <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.transcriptionStatus)}`}>
+                    {getAiStatusLabel(detail.transcriptionStatus)}
+                  </span>
+                  <input
+                    value={transcriptQuery}
+                    onChange={(event) => setTranscriptQuery(event.target.value)}
+                    placeholder="Search transcript..."
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-violet-500"
+                  />
+                </div>
               </div>
               <div className="space-y-4">
                 {detail.transcriptSegments.length > 0 ? (
@@ -238,7 +261,7 @@ function CallDetailPageInner({ organizationId, callId, initialData }: Props) {
                   ))
                 ) : (
                   <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-300">
-                    {detail.transcriptText ?? "No transcript is available for this call."}
+                    {detail.transcriptText ?? getAiEmptyState("transcription", detail.transcriptionStatus, detail.transcriptionError)}
                   </div>
                 )}
               </div>
@@ -250,6 +273,12 @@ function CallDetailPageInner({ organizationId, callId, initialData }: Props) {
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Analysis</p>
                 <h2 className="mt-1 text-lg font-semibold text-white">Model Output</h2>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.analysisStatus)}`}>
+                    {getAiStatusLabel(detail.analysisStatus)}
+                  </span>
+                  <span>{formatDateTime(detail.analysisCreatedAt)}</span>
+                </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4">
@@ -271,6 +300,9 @@ function CallDetailPageInner({ organizationId, callId, initialData }: Props) {
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6">
+                <p className="text-sm leading-6 text-slate-300">
+                  {detail.analysisSummary ?? getAiEmptyState("analysis", detail.analysisStatus, detail.analysisError)}
+                </p>
                 <p className="text-[10px] uppercase tracking-wider text-slate-500">Structured Output</p>
                 <pre className="mt-3 whitespace-pre-wrap break-all text-xs leading-6 text-slate-300">
                   {detail.analysisStructuredOutput ? JSON.stringify(detail.analysisStructuredOutput, null, 2) : "No structured output stored."}

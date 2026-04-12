@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, TablesInsert } from "../../supabase/types";
 import { insertAuditLog, isValidImportStoragePath, slugify } from "../lib/app-data";
+import { enqueueAiJob } from "./ai-jobs";
 import { getImportBatchFinalStatus, parseCsv, type CsvRow } from "./import-csv";
 
 type SupabaseAny = SupabaseClient<Database>;
@@ -219,6 +220,13 @@ export async function dispatchImportBatch(
       const campaignName = firstValue(row, ["campaign_name", "campaign"]);
       const publisherName = firstValue(row, ["publisher_name", "publisher"]);
       const transcriptText = firstValue(row, ["transcript_text", "transcript"]);
+      const recordingUrl = firstValue(row, [
+        "recording_url",
+        "recording",
+        "audio_url",
+        "call_recording_url",
+      ]);
+      const language = firstValue(row, ["language", "audio_language", "transcript_language"]);
       const disposition = firstValue(row, ["current_disposition", "disposition"]);
 
       if (!callerNumber || !startedAt) {
@@ -252,10 +260,13 @@ export async function dispatchImportBatch(
           started_at: startedAt,
           ended_at: endedAt || null,
           duration_seconds: durationSeconds,
+          recording_url: recordingUrl || null,
           source_provider: batch.source_provider,
           current_disposition: disposition || null,
           current_review_status: "unreviewed",
-          source_status: "received",
+          source_status: transcriptText || recordingUrl ? "received" : "missing_media",
+          transcription_status: transcriptText ? "completed" : "pending",
+          analysis_status: "pending",
         };
 
         const callInsert = await client
@@ -296,6 +307,7 @@ export async function dispatchImportBatch(
             campaign_name: campaignName || null,
             publisher_name: publisherName || null,
             disposition: disposition || null,
+            recording_url: recordingUrl || null,
           },
         };
 
@@ -310,11 +322,25 @@ export async function dispatchImportBatch(
             call_id: callId,
             transcript_text: transcriptText,
             transcript_segments: [],
+            transcription_version: "import",
           });
 
           if (transcriptInsert.error) {
             throw new Error(transcriptInsert.error.message);
           }
+
+          await enqueueAiJob(client, {
+            organizationId: options.organizationId,
+            callId,
+            jobType: "analysis",
+          });
+        } else if (recordingUrl) {
+          await enqueueAiJob(client, {
+            organizationId: options.organizationId,
+            callId,
+            jobType: "transcription",
+            payload: language ? { language } : {},
+          });
         }
 
         acceptedCount += 1;

@@ -2,6 +2,7 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { formatDuration, getCallDetail } from "../../../lib/app-data";
 import { getBrowserSupabase } from "../../../lib/supabase/browser-client";
+import { getAiEmptyState, getAiStatusClassName, getAiStatusLabel } from "../ai-status";
 import { CallReviewActions } from "./CallReviewActions";
 import { useCallReviewMutation } from "../useCallReviewMutation";
 
@@ -148,13 +149,26 @@ export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }:
                 <section className="space-y-6">
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">AI Summary</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.transcriptionStatus)}`}>
+                        Transcript: {getAiStatusLabel(detail.transcriptionStatus)}
+                      </span>
+                      <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.analysisStatus)}`}>
+                        Analysis: {getAiStatusLabel(detail.analysisStatus)}
+                      </span>
+                    </div>
                     <p className="text-sm leading-6 text-slate-300">
-                      {detail.analysisSummary ?? "No AI analysis has been stored for this call yet."}
+                      {detail.analysisSummary ?? getAiEmptyState("analysis", detail.analysisStatus, detail.analysisError)}
                     </p>
                     {detail.suggestedDisposition && (
                       <p className="mt-3 text-xs uppercase tracking-wider text-violet-400">
                         Suggested disposition: {detail.suggestedDisposition}
                       </p>
+                    )}
+                    {(detail.analysisError || detail.transcriptionError) && (
+                      <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                        {detail.analysisError ?? detail.transcriptionError}
+                      </div>
                     )}
                   </div>
 
@@ -215,6 +229,9 @@ export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }:
                       <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Transcript</p>
                       <p className="mt-1 text-xs text-slate-500">Review the call evidence as captured.</p>
                     </div>
+                    <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.transcriptionStatus)}`}>
+                      {getAiStatusLabel(detail.transcriptionStatus)}
+                    </span>
                   </div>
                   {detail.transcriptSegments.length > 0 ? (
                     detail.transcriptSegments.map((segment, index) => (
@@ -225,7 +242,7 @@ export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }:
                     ))
                   ) : (
                     <p className="leading-6 text-slate-300">
-                      {detail.transcriptText ?? "No transcript captured for this call."}
+                      {detail.transcriptText ?? getAiEmptyState("transcription", detail.transcriptionStatus, detail.transcriptionError)}
                     </p>
                   )}
                 </section>
@@ -235,8 +252,14 @@ export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }:
                 <section className="space-y-4">
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Analysis Overview</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.analysisStatus)}`}>
+                        {getAiStatusLabel(detail.analysisStatus)}
+                      </span>
+                      <span>{formatDateTime(detail.analysisCreatedAt)}</span>
+                    </div>
                     <p className="text-sm leading-6 text-slate-300">
-                      {detail.analysisSummary ?? "No AI analysis has been stored yet."}
+                      {detail.analysisSummary ?? getAiEmptyState("analysis", detail.analysisStatus, detail.analysisError)}
                     </p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">

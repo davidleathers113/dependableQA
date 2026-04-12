@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json, TablesInsert } from "../../supabase/types";
 import { insertAuditLog, slugify, type IntegrationProvider } from "../lib/app-data";
+import { enqueueAiJob } from "./ai-jobs";
 import { createHmacSha256Hex, getHeaderValue, safeEqualText } from "./netlify-request";
 
 type SupabaseAny = SupabaseClient<Database>;
@@ -369,6 +370,9 @@ export async function ingestIntegrationCalls(
       const startedAt = toIsoDate(
         asString(callPayload.startedAt || callPayload.started_at || new Date().toISOString())
       );
+      const recordingUrl = asString(callPayload.recordingUrl || callPayload.recording_url);
+      const transcriptText = asString(callPayload.transcriptText || callPayload.transcript_text);
+      const language = asString(callPayload.language || callPayload.transcript_language || callPayload.audio_language);
       const dedupeHash = `${integration.provider}:${externalCallId || callerNumber}:${startedAt}`;
 
       const callValues: TablesInsert<"calls"> = {
@@ -386,8 +390,11 @@ export async function ingestIntegrationCalls(
         source_provider: integration.provider,
         current_disposition:
           asString(callPayload.currentDisposition || callPayload.current_disposition) || null,
-        source_status: "received",
       };
+
+      if (recordingUrl) {
+        callValues.recording_url = recordingUrl;
+      }
 
       const callInsert = await client
         .from("calls")
@@ -416,7 +423,6 @@ export async function ingestIntegrationCalls(
         throw new Error(snapshotInsert.error.message);
       }
 
-      const transcriptText = asString(callPayload.transcriptText || callPayload.transcript_text);
       if (transcriptText) {
         const transcriptInsert = await client.from("call_transcripts").upsert(
           {
@@ -424,6 +430,7 @@ export async function ingestIntegrationCalls(
             call_id: callId,
             transcript_text: transcriptText,
             transcript_segments: [],
+            transcription_version: "integration",
           },
           {
             onConflict: "call_id",
@@ -432,6 +439,44 @@ export async function ingestIntegrationCalls(
 
         if (transcriptInsert.error) {
           throw new Error(transcriptInsert.error.message);
+        }
+
+        const callUpdate = await client
+          .from("calls")
+          .update({
+            transcription_status: "completed",
+            transcription_error: null,
+          })
+          .eq("organization_id", integration.organizationId)
+          .eq("id", callId);
+
+        if (callUpdate.error) {
+          throw new Error(callUpdate.error.message);
+        }
+
+        await enqueueAiJob(client, {
+          organizationId: integration.organizationId,
+          callId,
+          jobType: "analysis",
+        });
+      } else if (recordingUrl) {
+        await enqueueAiJob(client, {
+          organizationId: integration.organizationId,
+          callId,
+          jobType: "transcription",
+          payload: language ? { language } : {},
+        });
+      } else {
+        const missingSourceUpdate = await client
+          .from("calls")
+          .update({
+            source_status: "missing_media",
+          })
+          .eq("organization_id", integration.organizationId)
+          .eq("id", callId);
+
+        if (missingSourceUpdate.error) {
+          throw new Error(missingSourceUpdate.error.message);
         }
       }
 

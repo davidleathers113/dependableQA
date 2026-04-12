@@ -7,9 +7,11 @@ import {
   filterImportBatches,
   findDuplicateImportBatch,
   formatImportDateTime,
+  getImportProviderHint,
   getImportRetryHelper,
   getImportProviderHelp,
   getImportProviderLabel,
+  getImportUploadPhaseCopy,
   normalizeImportDispatchError,
   getImportStatusClassName,
   hasActiveImportBatches,
@@ -49,6 +51,14 @@ describe("imports helpers", () => {
     expect(getImportProviderLabel("trackdrive")).toBe("TrackDrive");
     expect(getImportProviderHelp("custom").includes("caller number")).toBe(true);
     expect(getImportProviderHelp("ringba").includes("publisher fields")).toBe(true);
+    expect(getImportProviderHint("auto", "custom")).toEqual({
+      label: "Auto-detect",
+      text: "Auto-detect is on for Ringba, TrackDrive, and Retreaver exports.",
+    });
+    expect(getImportProviderHint("manual", "trackdrive")).toEqual({
+      label: "TrackDrive format",
+      text: "Use caller number, created time, and duration.",
+    });
   });
 
   it("maps status values to semantic badge styles", () => {
@@ -186,6 +196,17 @@ describe("imports helpers", () => {
 
   it("formats import timestamps for the table", () => {
     expect(formatImportDateTime("2026-04-10T18:33:00.000Z").includes("Apr")).toBe(true);
+  });
+
+  it("returns shorter upload-phase helper copy", () => {
+    expect(getImportUploadPhaseCopy("validating")).toEqual({
+      primary: "Checking file...",
+      secondary: "Validating the CSV and checking the format",
+    });
+    expect(getImportUploadPhaseCopy("idle")).toEqual({
+      primary: "Drop a CSV file here, or browse",
+      secondary: "CSV only · Auto-detect first",
+    });
   });
 
   it("normalizes retry dispatch errors", () => {

@@ -4,6 +4,8 @@ import {
   getDiagnosticsSummary,
   getDiagnosticsSummaryLine,
   getIntegrationHealth,
+  getIntegrationLatestEventText,
+  getIntegrationLatestStatusLabel,
   getIntegrationSummaryMeta,
   getSecretSourceLabel,
 } from "./helpers";
@@ -45,35 +47,42 @@ describe("integration helpers", () => {
   });
 
   it("derives needs configuration for catalog placeholders", () => {
-    const health = getIntegrationHealth(
-      createIntegration({
-        isConfigured: false,
-        isCatalogPlaceholder: true,
-      })
-    );
+    const integration = createIntegration({
+      isConfigured: false,
+      isCatalogPlaceholder: true,
+    });
+    const health = getIntegrationHealth(integration);
 
     expect(health).toEqual({
       state: "needs-configuration",
-      label: "Needs configuration",
-      description: "This provider has not been configured yet.",
+      label: "Not connected",
+      description: "Connect this provider to start receiving signed webhook events.",
     });
+    expect(getIntegrationLatestStatusLabel(integration)).toBe("Not connected yet");
+    expect(getIntegrationLatestEventText(integration)).toBe("Connect this provider to start receiving webhook events.");
+    expect(getDiagnosticsSummaryLine(integration)).toBe("Connect this provider to start receiving diagnostics.");
   });
 
   it("derives awaiting first event when auth is ready but no success exists", () => {
-    const health = getIntegrationHealth(
-      createIntegration({
-        webhookAuth: {
-          authType: "hmac-sha256",
-          headerName: "x-dependableqa-signature",
-          prefix: "sha256=",
-          secretConfigured: true,
-          secretSource: "integration",
-        },
-      })
-    );
+    const integration = createIntegration({
+      webhookAuth: {
+        authType: "hmac-sha256",
+        headerName: "x-dependableqa-signature",
+        prefix: "sha256=",
+        secretConfigured: true,
+        secretSource: "integration",
+      },
+    });
+    const health = getIntegrationHealth(integration);
 
     expect(health.state).toBe("awaiting-first-event");
     expect(health.label).toBe("Awaiting first event");
+    expect(getIntegrationLatestEventText(integration)).toBe(
+      "Configuration is complete. Waiting for the first webhook event."
+    );
+    expect(getDiagnosticsSummaryLine(integration)).toBe(
+      "Configuration is complete. Waiting for the first webhook event."
+    );
   });
 
   it("derives healthy when a secret is configured and a success exists", () => {
@@ -194,6 +203,33 @@ describe("integration helpers", () => {
     );
 
     expect(meta.latestStatusLabel).toBe("Recent event recorded");
+  });
+
+  it("surfaces recent warning activity when warnings exist without timestamps", () => {
+    const integration = createIntegration({
+      webhookAuth: {
+        authType: "hmac-sha256",
+        headerName: "x-dependableqa-signature",
+        prefix: "sha256=",
+        secretConfigured: true,
+        secretSource: "integration",
+      },
+      recentEvents: [
+        {
+          id: "event-1",
+          eventType: "webhook.warning",
+          severity: "warning",
+          message: "Delayed",
+          createdAt: "2026-04-10T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(getIntegrationHealth(integration).state).toBe("degraded");
+    expect(getIntegrationLatestStatusLabel(integration)).toBe("Recent warning recorded");
+    expect(getDiagnosticsSummaryLine(integration)).toBe(
+      "Recent webhook events need attention. Review the latest messages below."
+    );
   });
 
   it("prefers the newest success timestamp over an older error", () => {

@@ -89,14 +89,14 @@ export function getImportProviderHint(mode: ImportMode, provider: IntegrationPro
   if (mode === "auto") {
     return {
       label: "Auto-detect",
-      text: "DependableQA will try to identify TrackDrive, Ringba, and Retreaver exports automatically.",
+      text: "Auto-detect is on for Ringba, TrackDrive, and Retreaver exports.",
     };
   }
 
   if (provider === "trackdrive") {
     return {
       label: "TrackDrive format",
-      text: "Use an export with caller number, duration, and created time.",
+      text: "Use caller number, created time, and duration.",
     };
   }
 
@@ -110,13 +110,13 @@ export function getImportProviderHint(mode: ImportMode, provider: IntegrationPro
   if (provider === "retreaver") {
     return {
       label: "Retreaver format",
-      text: "Use an export with caller number, call start time, and duration.",
+      text: "Use caller number, start time, and duration.",
     };
   }
 
   return {
     label: "Custom format",
-    text: "Include caller number and started time at minimum.",
+    text: "Include caller number and started time.",
   };
 }
 
@@ -333,7 +333,7 @@ export function getImportUploadPhaseCopy(phase: ImportUploadPhase, hasError = fa
   if (phase === "validating") {
     return {
       primary: "Checking file...",
-      secondary: "Validating your CSV and detecting the provider format",
+      secondary: "Validating the CSV and checking the format",
     };
   }
 
@@ -367,7 +367,7 @@ export function getImportUploadPhaseCopy(phase: ImportUploadPhase, hasError = fa
 
   return {
     primary: "Drop a CSV file here, or browse",
-    secondary: "CSV only · Upload starts immediately",
+    secondary: "CSV only · Auto-detect first",
   };
 }
 
