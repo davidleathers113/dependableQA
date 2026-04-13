@@ -265,6 +265,16 @@ function parseNonNegativeInteger(value: string, key: string) {
   return Math.floor(parsedValue);
 }
 
+function requireIsoDateValue(searchParams: URLSearchParams, key: string) {
+  const value = requireQueryValue(searchParams, key);
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${key} must be a valid date/time value.`);
+  }
+
+  return parsed.toISOString();
+}
+
 export function getRingbaMinimumDurationSeconds(integration: IntegrationContext) {
   return getPublicIntegrationRingbaConfig(integration.config).minimumDurationSeconds;
 }
@@ -287,7 +297,7 @@ export function parseRingbaPixelRequest(requestUrl: URL) {
     durationSeconds,
     recordingUrl: requireQueryValue(requestUrl.searchParams, "recording_url"),
     campaignName: requireQueryValue(requestUrl.searchParams, "campaign_name"),
-    startedAt: requireQueryValue(requestUrl.searchParams, "call_timestamp"),
+    startedAt: requireIsoDateValue(requestUrl.searchParams, "call_timestamp"),
   };
 
   const publisherName = asString(requestUrl.searchParams.get("publisher_name"));
@@ -508,7 +518,7 @@ export async function ingestIntegrationCalls(
         organization_id: integration.organizationId,
         call_id: callId,
         source_provider: integration.provider,
-        source_kind: "webhook",
+        source_kind: payload.ingestionMode === "pixel" ? "pixel" : "webhook",
         raw_payload: callPayload as Json,
         normalized_payload: callPayload as Json,
       };

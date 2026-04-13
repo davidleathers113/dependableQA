@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isIP } from "node:net";
 import { toFile } from "openai";
 import type { Database, Json } from "../../supabase/types";
 import { getOpenAiClient, getOpenAiServerConfig } from "../lib/openai/server-client";
@@ -112,6 +113,79 @@ function createNonRetryableError(message: string) {
   return error;
 }
 
+function isBlockedIpv4Host(hostname: string) {
+  const parts = hostname.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) {
+    return true;
+  }
+
+  if (parts[0] === 169 && parts[1] === 254) {
+    return true;
+  }
+
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) {
+    return true;
+  }
+
+  return parts[0] === 192 && parts[1] === 168;
+}
+
+function isBlockedIpv6Host(hostname: string) {
+  const normalized = hostname.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized === "::1") {
+    return true;
+  }
+
+  return (
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe8") ||
+    normalized.startsWith("fe9") ||
+    normalized.startsWith("fea") ||
+    normalized.startsWith("feb")
+  );
+}
+
+function assertSafeRecordingUrl(urlText: string) {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(urlText);
+  } catch {
+    throw createNonRetryableError("Recording URL is invalid.");
+  }
+
+  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+    throw createNonRetryableError("Recording URL must use http or https.");
+  }
+
+  const hostname = parsedUrl.hostname.trim().toLowerCase();
+  if (!hostname) {
+    throw createNonRetryableError("Recording URL hostname is required.");
+  }
+
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+    throw createNonRetryableError("Recording URL hostname is not allowed.");
+  }
+
+  const ipVersion = isIP(hostname);
+  if (
+    (ipVersion === 4 && isBlockedIpv4Host(hostname)) ||
+    (ipVersion === 6 && isBlockedIpv6Host(hostname))
+  ) {
+    throw createNonRetryableError("Recording URL must not target a private or loopback host.");
+  }
+
+  return parsedUrl;
+}
+
 async function loadCallForTranscription(client: SupabaseAny, organizationId: string, callId: string) {
   const result = await client
     .from("calls")
@@ -147,6 +221,7 @@ async function downloadRecordingFromUrl(
   callRow: Record<string, unknown>,
   urlText: string
 ) {
+  const safeUrl = assertSafeRecordingUrl(urlText);
   const response = await fetch(urlText);
   if (!response.ok) {
     throw new Error(`Unable to fetch recording. Upstream returned ${response.status}.`);
@@ -154,8 +229,7 @@ async function downloadRecordingFromUrl(
 
   const contentType = response.headers.get("content-type")?.trim() || "audio/mpeg";
   const bytes = Buffer.from(await response.arrayBuffer());
-  const url = new URL(urlText);
-  const rawName = url.pathname.split("/").at(-1) || "recording";
+  const rawName = safeUrl.pathname.split("/").at(-1) || "recording";
   const extension = inferFileExtension(contentType, rawName);
   const storagePath = `${asString(callRow.organization_id)}/${asString(callRow.id)}${extension}`;
 

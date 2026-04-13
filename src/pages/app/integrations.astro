@@ -7,6 +7,7 @@ import { requireAppSession } from '../../lib/auth/require-app-session';
 
 const session = await requireAppSession(Astro);
 const env = typeof process !== "undefined" ? process.env : {};
+const publicAppOrigin = (env.NETLIFY_SITE_URL || env.APP_URL || "").trim();
 const initialData = await getIntegrationsSummary(Astro.locals.supabase, session.organization.id, {
   fallbackSecretConfigured: Boolean(env.INTEGRATION_INGEST_SHARED_SECRET),
   fallbackHeaderName: env.INTEGRATION_INGEST_SIGNATURE_HEADER,
@@ -15,6 +16,11 @@ const initialData = await getIntegrationsSummary(Astro.locals.supabase, session.
 ---
 
 <AppLayout title="Integrations" session={session}>
+  <script is:inline define:vars={{ publicAppOrigin }}>
+    if (typeof window !== "undefined" && publicAppOrigin) {
+      window.__DEPENDABLEQA_PUBLIC_APP_ORIGIN__ = publicAppOrigin;
+    }
+  </script>
   <IntegrationsPage
     client:load
     organizationId={session.organization.id}

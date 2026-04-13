@@ -19,7 +19,7 @@ vi.mock("../lib/openai/server-client", () => ({
 
 import { transcribeCall } from "./transcribe-call";
 
-function createClient() {
+function createClient(callOverrides: Partial<Record<string, unknown>> = {}) {
   const transcriptWrites: Array<Record<string, unknown>> = [];
   const callUpdates: Array<Record<string, unknown>> = [];
   const uploads: Array<{ path: string; bytes: Buffer; options: Record<string, unknown> }> = [];
@@ -44,6 +44,7 @@ function createClient() {
                       duration_seconds: 65,
                       transcription_started_at: "2026-04-13T10:00:00.000Z",
                       analysis_error: "Existing analysis error",
+                      ...callOverrides,
                     },
                     error: null,
                   })),
@@ -212,5 +213,47 @@ describe("transcribeCall", () => {
     expect(transcriptionCreateMock).not.toHaveBeenCalled();
     expect(transcriptWrites).toHaveLength(0);
     expect(uploads).toHaveLength(1);
+  });
+
+  it("rejects localhost recording URLs before fetching them", async () => {
+    const { client } = createClient({
+      recording_url: "http://localhost/recording.mp3",
+    });
+
+    await expect(
+      transcribeCall(client as never, {
+        organizationId: "org_1",
+        callId: "call_1",
+      })
+    ).rejects.toThrow("Recording URL hostname is not allowed.");
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(transcriptionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces unreachable upstream recording failures", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response("not found", {
+          status: 404,
+          headers: {
+            "content-type": "text/plain",
+          },
+        })
+      )
+    );
+
+    const { client } = createClient();
+
+    await expect(
+      transcribeCall(client as never, {
+        organizationId: "org_1",
+        callId: "call_1",
+        language: "en",
+      })
+    ).rejects.toThrow("Unable to fetch recording. Upstream returned 404.");
+
+    expect(transcriptionCreateMock).not.toHaveBeenCalled();
   });
 });

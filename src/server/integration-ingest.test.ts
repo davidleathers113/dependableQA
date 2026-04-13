@@ -32,7 +32,9 @@ function createIntegration(): IntegrationContext {
 }
 
 function createClient() {
+  const snapshots: Array<Record<string, unknown>> = [];
   return {
+    snapshots,
     client: {
       from(table: string) {
         if (table === "calls") {
@@ -55,7 +57,10 @@ function createClient() {
 
         if (table === "call_source_snapshots") {
           return {
-            insert: vi.fn(async () => ({ error: null })),
+            insert: vi.fn(async (values: Record<string, unknown>) => {
+              snapshots.push(values);
+              return { error: null };
+            }),
           };
         }
 
@@ -101,7 +106,7 @@ describe("ingestIntegrationCalls", () => {
   });
 
   it("enqueues transcription when the webhook payload includes a recording URL", async () => {
-    const { client } = createClient();
+    const { client, snapshots } = createClient();
     const result = await ingestIntegrationCalls(
       client as never,
       createIntegration(),
@@ -128,6 +133,9 @@ describe("ingestIntegrationCalls", () => {
       payload: {
         language: "en",
       },
+    });
+    expect(snapshots[0]).toMatchObject({
+      source_kind: "webhook",
     });
   });
 });
@@ -169,5 +177,45 @@ describe("parseRingbaPixelRequest", () => {
         )
       )
     ).toThrow("platform must be ringba.");
+  });
+
+  it("rejects malformed call timestamps instead of silently replacing them", () => {
+    expect(() =>
+      parseRingbaPixelRequest(
+        new URL(
+          "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=not-a-date"
+        )
+      )
+    ).toThrow("call_timestamp must be a valid date/time value.");
+  });
+
+  it("marks Ringba pixel snapshots with source_kind pixel", async () => {
+    const integration = {
+      ...createIntegration(),
+      provider: "ringba",
+    } satisfies IntegrationContext;
+    const { client, snapshots } = createClient();
+
+    await ingestIntegrationCalls(
+      client as never,
+      integration,
+      {
+        provider: "ringba",
+        platform: "ringba",
+        ingestionMode: "pixel",
+      },
+      [
+        {
+          callerNumber: "+15555550123",
+          startedAt: "2026-04-11T00:00:00.000Z",
+          recordingUrl: "https://example.com/call.mp3",
+        },
+      ]
+    );
+
+    expect(snapshots[0]).toMatchObject({
+      source_provider: "ringba",
+      source_kind: "pixel",
+    });
   });
 });

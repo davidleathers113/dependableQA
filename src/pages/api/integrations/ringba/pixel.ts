@@ -5,6 +5,7 @@ import {
   ingestIntegrationCalls,
   loadIntegrationContextByRingbaPublicIngestKey,
   parseRingbaPixelRequest,
+  recordIntegrationEvent,
   recordIntegrationFailure,
 } from "../../../../server/integration-ingest";
 
@@ -46,6 +47,16 @@ export const GET: APIRoute = async (context) => {
 
   const minimumDurationSeconds = getRingbaMinimumDurationSeconds(integration);
   if (parsedRequest.durationSeconds < minimumDurationSeconds) {
+    await recordIntegrationEvent(admin, integration, {
+      eventType: "pixel.skipped",
+      message: `Skipped ${integration.displayName} Ringba pixel because the call was below the minimum duration threshold.`,
+      severity: "info",
+      payload: {
+        reason: "below_minimum_duration",
+        minimumDurationSeconds,
+        receivedDurationSeconds: parsedRequest.durationSeconds,
+      },
+    });
     return json({
       ok: true,
       skipped: true,

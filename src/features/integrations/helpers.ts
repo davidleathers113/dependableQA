@@ -199,6 +199,17 @@ export function getPublicAppOrigin() {
     return "";
   }
 
+  const globalWindow = window as typeof window & {
+    __DEPENDABLEQA_PUBLIC_APP_ORIGIN__?: unknown;
+  };
+  const configuredOrigin =
+    typeof globalWindow.__DEPENDABLEQA_PUBLIC_APP_ORIGIN__ === "string"
+      ? globalWindow.__DEPENDABLEQA_PUBLIC_APP_ORIGIN__.trim()
+      : "";
+  if (configuredOrigin) {
+    return configuredOrigin;
+  }
+
   return window.location.origin;
 }
 
@@ -215,11 +226,11 @@ export function getRingbaPixelUrl({
     `api_key=${publicIngestKey}`,
     "platform=ringba",
     "call_id=[Call:InboundCallId]",
-    "caller_number=[Call:InboundPhoneNumber]",
+    "caller_number=[tag:InboundNumber:Number]",
     "duration_seconds=[tag:CallLength:Total]",
-    "recording_url=[tag:Recording:RecordingUrl]",
+    "recording_url=[Call:RecordingUrl]",
     "campaign_name=[tag:Campaign:Name]",
-    "call_timestamp=[Call:CallConnectionTime]",
+    "call_timestamp=[Call:CallConnectedTimestamp]",
   ];
 
   if (includePublisher) {

@@ -7,6 +7,7 @@ const {
   ingestIntegrationCalls,
   loadIntegrationContextByRingbaPublicIngestKey,
   parseRingbaPixelRequest,
+  recordIntegrationEvent,
   recordIntegrationFailure,
 } = vi.hoisted(() => ({
   getAdminSupabase: vi.fn(),
@@ -14,6 +15,7 @@ const {
   ingestIntegrationCalls: vi.fn(),
   loadIntegrationContextByRingbaPublicIngestKey: vi.fn(),
   parseRingbaPixelRequest: vi.fn(),
+  recordIntegrationEvent: vi.fn(),
   recordIntegrationFailure: vi.fn(),
 }));
 
@@ -26,6 +28,7 @@ vi.mock("../../src/server/integration-ingest", () => ({
   ingestIntegrationCalls,
   loadIntegrationContextByRingbaPublicIngestKey,
   parseRingbaPixelRequest,
+  recordIntegrationEvent,
   recordIntegrationFailure,
 }));
 
@@ -42,6 +45,7 @@ describe("/api/integrations/ringba/pixel", () => {
     ingestIntegrationCalls.mockReset();
     loadIntegrationContextByRingbaPublicIngestKey.mockReset();
     parseRingbaPixelRequest.mockReset();
+    recordIntegrationEvent.mockReset();
     recordIntegrationFailure.mockReset();
   });
 
@@ -111,6 +115,16 @@ describe("/api/integrations/ringba/pixel", () => {
 
     expect(response.status).toBe(200);
     expect(ingestIntegrationCalls).not.toHaveBeenCalled();
+    expect(recordIntegrationEvent).toHaveBeenCalledWith(admin, integration, {
+      eventType: "pixel.skipped",
+      message: "Skipped Ringba Primary Ringba pixel because the call was below the minimum duration threshold.",
+      severity: "info",
+      payload: {
+        reason: "below_minimum_duration",
+        minimumDurationSeconds: 30,
+        receivedDurationSeconds: 12,
+      },
+    });
     await expect(response.json()).resolves.toEqual({
       ok: true,
       skipped: true,

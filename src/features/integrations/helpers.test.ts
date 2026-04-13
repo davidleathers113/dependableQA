@@ -268,7 +268,7 @@ describe("integration helpers", () => {
         includeBuyer: false,
       })
     ).toBe(
-      "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=[Call:InboundCallId]&caller_number=[Call:InboundPhoneNumber]&duration_seconds=[tag:CallLength:Total]&recording_url=[tag:Recording:RecordingUrl]&campaign_name=[tag:Campaign:Name]&call_timestamp=[Call:CallConnectionTime]&publisher_name=[tag:Publisher:Name]"
+      "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=[Call:InboundCallId]&caller_number=[tag:InboundNumber:Number]&duration_seconds=[tag:CallLength:Total]&recording_url=[Call:RecordingUrl]&campaign_name=[tag:Campaign:Name]&call_timestamp=[Call:CallConnectedTimestamp]&publisher_name=[tag:Publisher:Name]"
     );
   });
 
