@@ -62,6 +62,36 @@ export interface CallFlagItem {
   category: string;
   description: string | null;
   evidenceSummary: string[];
+  source: "ai" | "rule" | "manual";
+  startSeconds: number | null;
+  endSeconds: number | null;
+}
+
+export interface TranscriptSegment {
+  id: string;
+  speaker: string;
+  text: string;
+  start?: number;
+  end?: number;
+}
+
+export interface CallReviewNoteItem {
+  id: string;
+  body: string;
+  startSeconds: number;
+  endSeconds: number | null;
+  createdAt: string;
+  createdBy: string;
+  authorName: string | null;
+}
+
+export interface CallAiMoment {
+  id: string;
+  speaker: string;
+  start: number | null;
+  end: number | null;
+  text: string;
+  reason: string;
 }
 
 export interface CallHistoryItem {
@@ -96,7 +126,7 @@ export interface CallDetail {
   transcriptModelName: string | null;
   transcriptVersion: string | null;
   transcriptUpdatedAt: string | null;
-  transcriptSegments: Array<{ speaker: string; text: string; start?: number; end?: number }>;
+  transcriptSegments: TranscriptSegment[];
   analysisStatus: string;
   analysisError: string | null;
   analysisSummary: string | null;
@@ -106,8 +136,13 @@ export interface CallDetail {
   analysisVersion: string | null;
   analysisCreatedAt: string | null;
   analysisStructuredOutput: Json | null;
+  complianceStatus: string | null;
+  complianceSummary: string | null;
+  aiMoments: CallAiMoment[];
   latestReviewNotes: string | null;
   latestReviewedByName: string | null;
+  hasRecording: boolean;
+  reviewNotes: CallReviewNoteItem[];
   flags: CallFlagItem[];
   history: CallHistoryItem[];
 }
@@ -719,15 +754,17 @@ export function buildImportStoragePath(organizationId: string, fileName: string,
   return `${organizationId.trim()}/${safeName}`;
 }
 
-function parseSegments(value: unknown): Array<{ speaker: string; text: string; start?: number; end?: number }> {
+function parseSegments(value: unknown): TranscriptSegment[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value
-    .map((item) => {
+    .map((item, index) => {
       const record = item as Record<string, unknown>;
+      const idRaw = asString(record.id);
       return {
+        id: idRaw.length > 0 ? idRaw : `seg-${String(index)}`,
         speaker: asString(record.speaker) || "Speaker",
         text: asString(record.text),
         start: typeof record.start === "number" ? record.start : undefined,
@@ -735,6 +772,53 @@ function parseSegments(value: unknown): Array<{ speaker: string; text: string; s
       };
     })
     .filter((item) => item.text.length > 0);
+}
+
+function parseAiMoments(structured: Json | null): CallAiMoment[] {
+  if (!structured || typeof structured !== "object") {
+    return [];
+  }
+
+  const record = structured as Record<string, unknown>;
+  const spans = record.evidenceSpans;
+  if (!Array.isArray(spans)) {
+    return [];
+  }
+
+  return spans.map((item, index) => {
+    const row = item as Record<string, unknown>;
+    return {
+      id: `ai-moment-${String(index)}`,
+      speaker: asString(row.speaker) || "Speaker",
+      start: typeof row.start === "number" ? row.start : null,
+      end: typeof row.end === "number" ? row.end : null,
+      text: asString(row.text),
+      reason: asString(row.reason),
+    };
+  });
+}
+
+function parseComplianceFromStructured(structured: Json | null): { status: string | null; summary: string | null } {
+  if (!structured || typeof structured !== "object") {
+    return { status: null, summary: null };
+  }
+
+  const compliance = (structured as Record<string, unknown>).compliance as Record<string, unknown> | undefined;
+  if (!compliance) {
+    return { status: null, summary: null };
+  }
+
+  return {
+    status: asString(compliance.status) || null,
+    summary: asString(compliance.summary) || null,
+  };
+}
+
+function normalizeFlagSource(value: string): CallFlagItem["source"] {
+  if (value === "manual" || value === "rule" || value === "ai") {
+    return value;
+  }
+  return "ai";
 }
 
 export function formatCurrency(cents: number, currency = "USD") {
@@ -1470,10 +1554,21 @@ export async function getCallsPageData(client: SupabaseAny, organizationId: stri
 }
 
 export async function getCallDetail(client: SupabaseAny, organizationId: string, callId: string): Promise<CallDetail | null> {
-  const [callResult, transcriptResult, analysisResult, flagsResult, reviewsResult, overridesResult, auditResult] = await Promise.all([
+  const [
+    callResult,
+    transcriptResult,
+    analysisResult,
+    flagsResult,
+    reviewsResult,
+    overridesResult,
+    auditResult,
+    notesResult,
+  ] = await Promise.all([
     client
       .from("calls")
-      .select("id, caller_number, destination_number, started_at, ended_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, source_status, transcription_status, transcription_error, analysis_status, analysis_error, campaigns(name), publishers(name), import_batches(filename)")
+      .select(
+        "id, caller_number, destination_number, started_at, ended_at, duration_seconds, current_disposition, current_review_status, flag_count, source_provider, import_batch_id, source_status, transcription_status, transcription_error, analysis_status, analysis_error, recording_storage_path, recording_url, campaigns(name), publishers(name), import_batches(filename)"
+      )
       .eq("organization_id", organizationId)
       .eq("id", callId)
       .single(),
@@ -1493,7 +1588,7 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
       .maybeSingle(),
     client
       .from("call_flags")
-      .select("id, title, severity, status, description, flag_category, evidence, created_at")
+      .select("id, title, severity, status, description, flag_category, evidence, created_at, start_seconds, end_seconds, source")
       .eq("organization_id", organizationId)
       .eq("call_id", callId)
       .order("created_at", { ascending: false }),
@@ -1516,6 +1611,12 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
       .eq("entity_id", callId)
       .order("created_at", { ascending: false })
       .limit(25),
+    client
+      .from("call_review_notes")
+      .select("id, body, start_seconds, end_seconds, created_at, created_by")
+      .eq("organization_id", organizationId)
+      .eq("call_id", callId)
+      .order("created_at", { ascending: false }),
   ]);
 
   if (callResult.error) {
@@ -1531,6 +1632,7 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
   assertNoError(reviewsResult.error, "Unable to load reviews.");
   assertNoError(overridesResult.error, "Unable to load overrides.");
   assertNoError(auditResult.error, "Unable to load audit log.");
+  assertNoError(notesResult.error, "Unable to load review notes.");
 
   const call = (callResult.data ?? null) as Record<string, unknown> | null;
   if (!call) {
@@ -1625,6 +1727,39 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
       ? `${asNumber(call.flag_count)} open flags`
       : null;
 
+  const noteRows = (notesResult.data ?? []) as Array<Record<string, unknown>>;
+  const noteAuthorIdSet = new Set<string>();
+  for (const noteRow of noteRows) {
+    const authorId = asString(noteRow.created_by);
+    if (authorId.length > 0) {
+      noteAuthorIdSet.add(authorId);
+    }
+  }
+  const noteAuthorIds = [...noteAuthorIdSet];
+  let noteAuthorNames = new Map<string, string | null>();
+  if (noteAuthorIds.length > 0) {
+    const profileLookup = await client
+      .from("profiles")
+      .select("id, first_name, last_name, email")
+      .in("id", noteAuthorIds);
+    assertNoError(profileLookup.error, "Unable to load note authors.");
+    noteAuthorNames = new Map(
+      ((profileLookup.data ?? []) as Array<Record<string, unknown>>).map((profileRow) => [
+        asString(profileRow.id),
+        getDisplayName(profileRow),
+      ])
+    );
+  }
+
+  const analysisStructuredOutput = analysis?.structured_output ? (analysis.structured_output as Json) : null;
+  const complianceParsed = parseComplianceFromStructured(analysisStructuredOutput);
+
+  const storagePath = asNullableString(call.recording_storage_path);
+  const externalRecordingUrl = asNullableString(call.recording_url);
+  const hasRecording =
+    (storagePath != null && storagePath.trim().length > 0) ||
+    (externalRecordingUrl != null && externalRecordingUrl.trim().length > 0);
+
   return {
     id: asString(call.id),
     callerNumber: asString(call.caller_number),
@@ -1658,9 +1793,25 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
     analysisModelName: asNullableString(analysis?.model_name),
     analysisVersion: asNullableString(analysis?.analysis_version),
     analysisCreatedAt: asNullableString(analysis?.created_at),
-    analysisStructuredOutput: analysis?.structured_output ? (analysis.structured_output as Json) : null,
+    analysisStructuredOutput,
+    complianceStatus: complianceParsed.status,
+    complianceSummary: complianceParsed.summary,
+    aiMoments: parseAiMoments(analysisStructuredOutput),
     latestReviewNotes: latestReview ? asNullableString(latestReview.review_notes) : null,
     latestReviewedByName: getDisplayName((latestReviewerProfileResult?.data ?? null) as Record<string, unknown> | null),
+    hasRecording,
+    reviewNotes: noteRows.map((row) => {
+      const authorId = asString(row.created_by);
+      return {
+        id: asString(row.id),
+        body: asString(row.body),
+        startSeconds: asNumber(row.start_seconds),
+        endSeconds: row.end_seconds == null ? null : asNumber(row.end_seconds),
+        createdAt: asString(row.created_at),
+        createdBy: authorId,
+        authorName: noteAuthorNames.get(authorId) ?? null,
+      } satisfies CallReviewNoteItem;
+    }),
     flags: ((flagsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
       id: asString(row.id),
       title: asString(row.title),
@@ -1669,6 +1820,9 @@ export async function getCallDetail(client: SupabaseAny, organizationId: string,
       category: asString(row.flag_category),
       description: asNullableString(row.description),
       evidenceSummary: buildEvidenceSummary(row.evidence),
+      source: normalizeFlagSource(asString(row.source)),
+      startSeconds: typeof row.start_seconds === "number" ? row.start_seconds : null,
+      endSeconds: typeof row.end_seconds === "number" ? row.end_seconds : null,
     })),
     history,
   };

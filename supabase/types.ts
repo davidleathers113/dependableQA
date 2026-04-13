@@ -408,6 +408,7 @@ export type Database = {
           call_id: string
           created_at: string
           description: string | null
+          end_seconds: number | null
           evidence: Json
           flag_category: string
           flag_type: string
@@ -415,6 +416,7 @@ export type Database = {
           organization_id: string
           severity: string
           source: string
+          start_seconds: number | null
           status: string
           title: string
           updated_at: string
@@ -423,6 +425,7 @@ export type Database = {
           call_id: string
           created_at?: string
           description?: string | null
+          end_seconds?: number | null
           evidence?: Json
           flag_category: string
           flag_type: string
@@ -430,6 +433,7 @@ export type Database = {
           organization_id: string
           severity: string
           source: string
+          start_seconds?: number | null
           status?: string
           title: string
           updated_at?: string
@@ -438,6 +442,7 @@ export type Database = {
           call_id?: string
           created_at?: string
           description?: string | null
+          end_seconds?: number | null
           evidence?: Json
           flag_category?: string
           flag_type?: string
@@ -445,6 +450,7 @@ export type Database = {
           organization_id?: string
           severity?: string
           source?: string
+          start_seconds?: number | null
           status?: string
           title?: string
           updated_at?: string
@@ -459,6 +465,64 @@ export type Database = {
           },
           {
             foreignKeyName: "call_flags_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      call_review_notes: {
+        Row: {
+          body: string
+          call_id: string
+          created_at: string
+          created_by: string
+          end_seconds: number | null
+          id: string
+          organization_id: string
+          start_seconds: number
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          call_id: string
+          created_at?: string
+          created_by: string
+          end_seconds?: number | null
+          id?: string
+          organization_id: string
+          start_seconds: number
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          call_id?: string
+          created_at?: string
+          created_by?: string
+          end_seconds?: number | null
+          id?: string
+          organization_id?: string
+          start_seconds?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_review_notes_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_review_notes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_review_notes_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
