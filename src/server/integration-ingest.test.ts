@@ -162,8 +162,61 @@ describe("parseRingbaPixelRequest", () => {
           recordingUrl: "https://example.com/recording.mp3",
           campaignName: "Alpha",
           startedAt: "2026-04-11T00:00:00.000Z",
+          rawCallTimestamp: "2026-04-11T00:00:00.000Z",
           publisherName: "PubOne",
           buyerName: "BuyerOne",
+        },
+      ],
+    });
+  });
+
+  it("accepts Unix millisecond timestamps from Ringba callbacks", () => {
+    const timestamp = "1776096520638";
+    const parsed = parseRingbaPixelRequest(
+      new URL(
+        `https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=${timestamp}`
+      )
+    );
+
+    expect(parsed.payload).toEqual({
+      provider: "ringba",
+      platform: "ringba",
+      ingestionMode: "pixel",
+      calls: [
+        {
+          externalCallId: "call_123",
+          callerNumber: "+15555550123",
+          durationSeconds: 61,
+          recordingUrl: "https://example.com/recording.mp3",
+          campaignName: "Alpha",
+          startedAt: new Date(Number(timestamp)).toISOString(),
+          rawCallTimestamp: timestamp,
+        },
+      ],
+    });
+  });
+
+  it("accepts Unix second timestamps from Ringba callbacks", () => {
+    const timestamp = "1776096520";
+    const parsed = parseRingbaPixelRequest(
+      new URL(
+        `https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=${timestamp}`
+      )
+    );
+
+    expect(parsed.payload).toEqual({
+      provider: "ringba",
+      platform: "ringba",
+      ingestionMode: "pixel",
+      calls: [
+        {
+          externalCallId: "call_123",
+          callerNumber: "+15555550123",
+          durationSeconds: 61,
+          recordingUrl: "https://example.com/recording.mp3",
+          campaignName: "Alpha",
+          startedAt: new Date(Number(timestamp) * 1000).toISOString(),
+          rawCallTimestamp: timestamp,
         },
       ],
     });

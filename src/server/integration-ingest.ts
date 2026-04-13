@@ -265,14 +265,78 @@ function parseNonNegativeInteger(value: string, key: string) {
   return Math.floor(parsedValue);
 }
 
-function requireIsoDateValue(searchParams: URLSearchParams, key: string) {
+function isSimpleNumericString(value: string) {
+  if (!value) {
+    return false;
+  }
+
+  let digitCount = 0;
+  let decimalCount = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if ((character === "+" || character === "-") && index === 0) {
+      continue;
+    }
+
+    if (character === ".") {
+      decimalCount += 1;
+      if (decimalCount > 1) {
+        return false;
+      }
+      continue;
+    }
+
+    if (character < "0" || character > "9") {
+      return false;
+    }
+
+    digitCount += 1;
+  }
+
+  return digitCount > 0;
+}
+
+function parseUnixTimestamp(value: string) {
+  if (!isSimpleNumericString(value)) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  const absoluteValue = Math.abs(numericValue);
+  if (absoluteValue >= 100_000_000_000) {
+    return new Date(numericValue);
+  }
+
+  if (absoluteValue >= 1_000_000_000) {
+    return new Date(numericValue * 1000);
+  }
+
+  return null;
+}
+
+function requireRingbaDateValue(searchParams: URLSearchParams, key: string) {
   const value = requireQueryValue(searchParams, key);
+  const unixTimestamp = parseUnixTimestamp(value);
+  if (unixTimestamp && !Number.isNaN(unixTimestamp.getTime())) {
+    return {
+      isoValue: unixTimestamp.toISOString(),
+      rawValue: value,
+    };
+  }
+
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`${key} must be a valid date/time value.`);
   }
 
-  return parsed.toISOString();
+  return {
+    isoValue: parsed.toISOString(),
+    rawValue: value,
+  };
 }
 
 export function getRingbaMinimumDurationSeconds(integration: IntegrationContext) {
@@ -290,6 +354,7 @@ export function parseRingbaPixelRequest(requestUrl: URL) {
     requireQueryValue(requestUrl.searchParams, "duration_seconds"),
     "duration_seconds"
   );
+  const startedAt = requireRingbaDateValue(requestUrl.searchParams, "call_timestamp");
 
   const normalizedCall: Record<string, unknown> = {
     externalCallId: requireQueryValue(requestUrl.searchParams, "call_id"),
@@ -297,7 +362,8 @@ export function parseRingbaPixelRequest(requestUrl: URL) {
     durationSeconds,
     recordingUrl: requireQueryValue(requestUrl.searchParams, "recording_url"),
     campaignName: requireQueryValue(requestUrl.searchParams, "campaign_name"),
-    startedAt: requireIsoDateValue(requestUrl.searchParams, "call_timestamp"),
+    startedAt: startedAt.isoValue,
+    rawCallTimestamp: startedAt.rawValue,
   };
 
   const publisherName = asString(requestUrl.searchParams.get("publisher_name"));

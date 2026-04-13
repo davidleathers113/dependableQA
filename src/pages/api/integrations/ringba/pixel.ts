@@ -24,22 +24,68 @@ function methodNotAllowed() {
   return json({ error: "Method not allowed" }, 405);
 }
 
+function getQueryValue(searchParams: URLSearchParams, key: string) {
+  const value = searchParams.get(key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function buildRejectedRingbaPixelPayload(requestUrl: URL, message: string) {
+  const searchParams = requestUrl.searchParams;
+
+  return {
+    reason: "invalid_query",
+    parseError: message,
+    requestQuery: {
+      platform: getQueryValue(searchParams, "platform"),
+      call_id: getQueryValue(searchParams, "call_id"),
+      duration_seconds: getQueryValue(searchParams, "duration_seconds"),
+      campaign_name: getQueryValue(searchParams, "campaign_name"),
+      call_timestamp: getQueryValue(searchParams, "call_timestamp"),
+      publisher_name: getQueryValue(searchParams, "publisher_name"),
+      buyer_name: getQueryValue(searchParams, "buyer_name"),
+      caller_number_present: Boolean(getQueryValue(searchParams, "caller_number")),
+      recording_url_present: Boolean(getQueryValue(searchParams, "recording_url")),
+    },
+  };
+}
+
 export const POST: APIRoute = async () => methodNotAllowed();
 
 export const GET: APIRoute = async (context) => {
+  const requestUrl = new URL(context.request.url);
+  const candidateApiKey = getQueryValue(requestUrl.searchParams, "api_key");
+  let admin: ReturnType<typeof getAdminSupabase> | null = null;
   let parsedRequest: ReturnType<typeof parseRingbaPixelRequest>;
   try {
-    parsedRequest = parseRingbaPixelRequest(new URL(context.request.url));
+    parsedRequest = parseRingbaPixelRequest(requestUrl);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Ringba pixel request is invalid.";
+    if (candidateApiKey) {
+      try {
+        admin = getAdminSupabase();
+        const integration = await loadIntegrationContextByRingbaPublicIngestKey(admin, candidateApiKey);
+        if (integration) {
+          await recordIntegrationEvent(admin, integration, {
+            eventType: "pixel.rejected",
+            message: `Rejected ${integration.displayName} Ringba pixel: ${message}`,
+            severity: "warning",
+            payload: buildRejectedRingbaPixelPayload(requestUrl, message),
+          });
+        }
+      } catch {
+        // Ignore diagnostics failures so callers still receive the underlying parse error.
+      }
+    }
+
     return json(
       {
-        error: error instanceof Error ? error.message : "Ringba pixel request is invalid.",
+        error: message,
       },
       400
     );
   }
 
-  const admin = getAdminSupabase();
+  admin ??= getAdminSupabase();
   const integration = await loadIntegrationContextByRingbaPublicIngestKey(admin, parsedRequest.apiKey);
   if (!integration) {
     return json({ error: "Ringba integration not found." }, 404);
