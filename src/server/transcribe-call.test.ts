@@ -42,6 +42,8 @@ function createClient() {
                       recording_url: "https://example.com/call.mp3",
                       recording_storage_path: null,
                       duration_seconds: 65,
+                      transcription_started_at: "2026-04-13T10:00:00.000Z",
+                      analysis_error: "Existing analysis error",
                     },
                     error: null,
                   })),
@@ -178,5 +180,37 @@ describe("transcribeCall", () => {
       transcription_error: null,
       recording_storage_path: "org_1/call_1.mp3",
     });
+    expect(Object.hasOwn(callUpdates.at(-1) ?? {}, "transcription_started_at")).toBe(false);
+    expect(Object.hasOwn(callUpdates.at(-1) ?? {}, "analysis_error")).toBe(false);
+  });
+
+  it("fails oversized recordings with a non-retryable error message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(new Uint8Array(26 * 1024 * 1024), {
+          status: 200,
+          headers: {
+            "content-type": "audio/mpeg",
+          },
+        })
+      )
+    );
+
+    const { client, transcriptWrites, uploads } = createClient();
+
+    await expect(
+      transcribeCall(client as never, {
+        organizationId: "org_1",
+        callId: "call_1",
+        language: "en",
+      })
+    ).rejects.toThrow(
+      "Recording exceeds the 25 MB transcription limit. Upload a smaller file or add chunking support before retrying."
+    );
+
+    expect(transcriptionCreateMock).not.toHaveBeenCalled();
+    expect(transcriptWrites).toHaveLength(0);
+    expect(uploads).toHaveLength(1);
   });
 });

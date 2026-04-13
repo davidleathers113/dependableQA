@@ -28,6 +28,8 @@ interface MinimalDiarizedTranscription {
   usage?: unknown;
 }
 
+type NonRetryableError = Error & { retryable?: boolean };
+
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -102,6 +104,12 @@ function inferDurationSeconds(
 
   const callDuration = typeof callRow.duration_seconds === "number" ? callRow.duration_seconds : null;
   return callDuration ?? 0;
+}
+
+function createNonRetryableError(message: string) {
+  const error = new Error(message) as NonRetryableError;
+  error.retryable = false;
+  return error;
 }
 
 async function loadCallForTranscription(client: SupabaseAny, organizationId: string, callId: string) {
@@ -195,7 +203,9 @@ async function loadRecordingSource(client: SupabaseAny, callRow: Record<string, 
 
 function assertRecordingSize(source: RecordingSource) {
   if (source.bytes.byteLength > MAX_AUDIO_BYTES) {
-    throw new Error("Recording exceeds the 25 MB transcription limit.");
+    throw createNonRetryableError(
+      "Recording exceeds the 25 MB transcription limit. Upload a smaller file or add chunking support before retrying."
+    );
   }
 }
 
@@ -262,11 +272,9 @@ export async function transcribeCall(
     .from("calls")
     .update({
       transcription_status: "completed",
-      transcription_started_at: null,
       transcription_completed_at: new Date().toISOString(),
       transcription_error: null,
       recording_storage_path: source.storagePath || asString(callRow.recording_storage_path) || null,
-      analysis_error: null,
     })
     .eq("organization_id", options.organizationId)
     .eq("id", options.callId);

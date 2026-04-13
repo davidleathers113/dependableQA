@@ -47,7 +47,7 @@ describe("integration helpers", () => {
     expect(health).toEqual({
       state: "needs-configuration",
       label: "Needs configuration",
-      description: "Ringba pixel setup is incomplete because the public ingest URL is not ready yet.",
+      description: "Ringba pixel setup is incomplete because this integration does not have a public ingest key yet.",
     });
   });
 

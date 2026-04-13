@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-const { insertAuditLog } = vi.hoisted(() => ({
+const { insertAuditLog, getOpenAiServerConfig } = vi.hoisted(() => ({
   insertAuditLog: vi.fn(),
+  getOpenAiServerConfig: vi.fn(),
 }));
 
 vi.mock("../../src/lib/app-data", async () => {
@@ -11,6 +12,10 @@ vi.mock("../../src/lib/app-data", async () => {
     insertAuditLog,
   };
 });
+
+vi.mock("../../src/lib/openai/server-client", () => ({
+  getOpenAiServerConfig,
+}));
 
 import { dispatchImportBatch } from "../../src/server/import-dispatch";
 import { runAiJobs } from "../../src/server/ai-jobs";
@@ -340,6 +345,11 @@ function createWorkflowClient(csvText: string) {
 
 describe("import to AI review workflow", () => {
   it("dispatches an imported transcript row and completes the analysis job", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
     const csv = [
       "caller_number,started_at,transcript_text",
       "+15555550123,2026-04-12T00:00:00.000Z,\"Agent: Hello. Customer: I need pricing.\"",
@@ -392,7 +402,7 @@ describe("import to AI review workflow", () => {
           return {
             modelName: "gpt-4.1-mini",
             summary: "Workflow summary",
-            suggestedDisposition: "qualified",
+            suggestedDisposition: "qualified" as const,
             confidence: 0.9,
             flagCount: 0,
           };

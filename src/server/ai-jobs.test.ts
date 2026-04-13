@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-const { insertAuditLog } = vi.hoisted(() => ({
+const { insertAuditLog, getOpenAiServerConfig } = vi.hoisted(() => ({
   insertAuditLog: vi.fn(),
+  getOpenAiServerConfig: vi.fn(),
 }));
 
 vi.mock("../lib/app-data", async () => {
@@ -11,6 +12,10 @@ vi.mock("../lib/app-data", async () => {
     insertAuditLog,
   };
 });
+
+vi.mock("../lib/openai/server-client", () => ({
+  getOpenAiServerConfig,
+}));
 
 import { claimAiJobs, enqueueAiJob, recoverExpiredAiJobs, runAiJobs } from "./ai-jobs";
 
@@ -253,6 +258,11 @@ function createClient(initialJobs: JobRow[] = []) {
 
 describe("ai jobs", () => {
   it("creates a queued job and updates the matching call status", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
     const { client, jobs, calls } = createClient();
 
     const result = await enqueueAiJob(client as never, {
@@ -273,6 +283,11 @@ describe("ai jobs", () => {
   });
 
   it("does not duplicate an existing queued job and can requeue a failed one", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
     const queuedJob: JobRow = {
       id: "job_1",
       organization_id: "org_1",
@@ -286,8 +301,10 @@ describe("ai jobs", () => {
       started_at: null,
       completed_at: null,
       lease_expires_at: null,
-      dedupe_key: "call_1:analysis",
-      payload_json: {},
+      dedupe_key: "call_1:analysis:v1:v1",
+      payload_json: {
+        analysisVersionKey: "v1:v1",
+      },
       last_error: null,
       created_at: "2026-04-11T00:00:00.000Z",
       updated_at: "2026-04-11T00:00:00.000Z",
@@ -335,6 +352,11 @@ describe("ai jobs", () => {
   });
 
   it("claims queued jobs that are ready to run", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
     const { client, jobs } = createClient([
       {
         id: "job_1",
@@ -371,6 +393,11 @@ describe("ai jobs", () => {
   });
 
   it("recovers expired leased jobs and re-queues them when retries remain", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
     const { client, jobs, calls } = createClient([
       {
         id: "job_1",
@@ -409,6 +436,11 @@ describe("ai jobs", () => {
   });
 
   it("runs queued jobs and enqueues downstream analysis after transcription", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
     const { client, jobs, calls } = createClient([
       {
         id: "job_1",
@@ -443,7 +475,7 @@ describe("ai jobs", () => {
         analysis: vi.fn(async () => ({
           modelName: "gpt-4.1-mini",
           summary: "Summary",
-          suggestedDisposition: "qualified",
+          suggestedDisposition: "qualified" as const,
           confidence: 0.9,
           flagCount: 0,
         })),
@@ -460,10 +492,123 @@ describe("ai jobs", () => {
     expect(jobs[1]).toMatchObject({
       job_type: "analysis",
       status: "queued",
+      dedupe_key: "call_1:analysis:v1:v1",
+      payload_json: {
+        analysisVersionKey: "v1:v1",
+      },
     });
     expect(calls.get("call_1")).toMatchObject({
       transcription_status: "processing",
       analysis_status: "queued",
+    });
+  });
+
+  it("creates a new analysis job when the analysis version changes", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v2",
+      analysisSchemaVersion: "v1",
+    });
+    const { client, jobs } = createClient([
+      {
+        id: "job_1",
+        organization_id: "org_1",
+        call_id: "call_1",
+        job_type: "analysis",
+        status: "completed",
+        attempt_count: 1,
+        max_attempts: 3,
+        priority: 100,
+        scheduled_at: "2026-04-11T00:00:00.000Z",
+        started_at: "2026-04-11T00:01:00.000Z",
+        completed_at: "2026-04-11T00:02:00.000Z",
+        lease_expires_at: null,
+        dedupe_key: "call_1:analysis:v1:v1",
+        payload_json: {
+          analysisVersionKey: "v1:v1",
+        },
+        last_error: null,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await enqueueAiJob(client as never, {
+      organizationId: "org_1",
+      callId: "call_1",
+      jobType: "analysis",
+    });
+
+    expect(result).toMatchObject({
+      created: true,
+      status: "queued",
+    });
+    expect(jobs).toHaveLength(2);
+    expect(jobs[1]).toMatchObject({
+      dedupe_key: "call_1:analysis:v2:v1",
+      payload_json: {
+        analysisVersionKey: "v2:v1",
+      },
+    });
+  });
+
+  it("marks non-retryable job failures as failed immediately", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
+    const { client, jobs, calls } = createClient([
+      {
+        id: "job_1",
+        organization_id: "org_1",
+        call_id: "call_1",
+        job_type: "transcription",
+        status: "queued",
+        attempt_count: 0,
+        max_attempts: 3,
+        priority: 100,
+        scheduled_at: "2026-04-11T00:00:00.000Z",
+        started_at: null,
+        completed_at: null,
+        lease_expires_at: null,
+        dedupe_key: "call_1:transcription",
+        payload_json: {},
+        last_error: null,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await runAiJobs(client as never, {
+      limit: 1,
+      handlers: {
+        transcription: vi.fn(async () => {
+          const error = new Error("Recording exceeds the 25 MB transcription limit.");
+          (error as Error & { retryable?: boolean }).retryable = false;
+          throw error;
+        }),
+        analysis: vi.fn(async () => ({
+          modelName: "gpt-4.1-mini",
+          summary: "Summary",
+          suggestedDisposition: "qualified" as const,
+          confidence: 0.9,
+          flagCount: 0,
+        })),
+      },
+    });
+
+    expect(result.processed[0]).toMatchObject({
+      id: "job_1",
+      status: "failed",
+    });
+    expect(jobs[0]).toMatchObject({
+      status: "failed",
+      last_error: "Recording exceeds the 25 MB transcription limit.",
+    });
+    expect(calls.get("call_1")).toMatchObject({
+      transcription_status: "failed",
+      transcription_error: "Recording exceeds the 25 MB transcription limit.",
     });
   });
 });

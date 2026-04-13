@@ -30,8 +30,8 @@ describe("integration wizard content", () => {
     expect(steps).toHaveLength(14);
     expect(steps[4]).toMatchObject({
       sectionLabel: "Step 1: Create the pixel",
-      title: "Copy the complete webhook URL",
-      codeLabel: "Complete Webhook URL",
+      title: "Copy the complete pixel URL",
+      codeLabel: "Complete Pixel URL",
       showCopyButton: true,
     });
     expect(steps[8]?.sectionLabel).toBe("Step 2: Add pixel to campaigns");

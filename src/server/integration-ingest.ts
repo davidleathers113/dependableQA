@@ -297,6 +297,8 @@ export function parseRingbaPixelRequest(requestUrl: URL) {
 
   const buyerName = asString(requestUrl.searchParams.get("buyer_name"));
   if (buyerName) {
+    // Preserve buyer attribution in the normalized snapshot payload until it is promoted
+    // into first-class reporting/storage fields.
     normalizedCall.buyerName = buyerName;
   }
 

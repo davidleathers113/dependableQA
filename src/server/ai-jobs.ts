@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "../../supabase/types";
 import { insertAuditLog } from "../lib/app-data";
+import { getOpenAiServerConfig } from "../lib/openai/server-client";
 import { analyzeCall } from "./analyze-call";
 import { transcribeCall } from "./transcribe-call";
 
@@ -30,8 +31,46 @@ function asObject(value: Json | null | undefined) {
     : {};
 }
 
-function buildDedupeKey(callId: string, jobType: AiJobType) {
+function getAnalysisVersionKey(payload: Record<string, Json>) {
+  const explicitVersionKey =
+    asString(payload.analysisVersionKey) ||
+    asString(payload.reanalysisKey) ||
+    asString(payload.dedupeSuffix);
+
+  if (explicitVersionKey) {
+    return explicitVersionKey;
+  }
+
+  const config = getOpenAiServerConfig();
+  return `${config.analysisPromptVersion}:${config.analysisSchemaVersion}`;
+}
+
+function normalizeJobPayload(jobType: AiJobType, payload: Json | undefined) {
+  const normalizedPayload = asObject(payload);
+  if (jobType !== "analysis") {
+    return normalizedPayload;
+  }
+
+  return {
+    ...normalizedPayload,
+    analysisVersionKey: getAnalysisVersionKey(normalizedPayload),
+  } satisfies Record<string, Json>;
+}
+
+function buildDedupeKey(callId: string, jobType: AiJobType, payload: Record<string, Json>) {
+  if (jobType === "analysis") {
+    return `${callId}:${jobType}:${getAnalysisVersionKey(payload)}`;
+  }
+
   return `${callId}:${jobType}`;
+}
+
+function shouldRetryJob(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return true;
+  }
+
+  return (error as { retryable?: unknown }).retryable !== false;
 }
 
 function getRetryDelayMs(attemptCount: number) {
@@ -188,7 +227,8 @@ export async function enqueueAiJob(
     maxAttempts?: number;
   }
 ) {
-  const dedupeKey = buildDedupeKey(options.callId, options.jobType);
+  const payload = normalizeJobPayload(options.jobType, options.payload);
+  const dedupeKey = buildDedupeKey(options.callId, options.jobType, payload);
   const existing = await client
     .from("ai_jobs")
     .select("*")
@@ -224,7 +264,7 @@ export async function enqueueAiJob(
         lease_expires_at: null,
         completed_at: null,
         last_error: null,
-        payload_json: options.payload ?? {},
+        payload_json: payload,
         priority: options.priority ?? existing.data.priority,
       })
       .eq("id", existing.data.id)
@@ -255,7 +295,7 @@ export async function enqueueAiJob(
       priority: options.priority ?? 100,
       max_attempts: options.maxAttempts ?? 3,
       dedupe_key: dedupeKey,
-      payload_json: options.payload ?? {},
+      payload_json: payload,
     })
     .select("*")
     .single();
@@ -496,7 +536,7 @@ async function completeAiJob(client: SupabaseAny, job: AiJobRow) {
 
 async function failAiJob(client: SupabaseAny, job: AiJobRow, error: unknown) {
   const errorMessage = error instanceof Error ? error.message : "Unexpected AI job failure.";
-  const shouldRetry = job.attempt_count < job.max_attempts;
+  const shouldRetry = shouldRetryJob(error) && job.attempt_count < job.max_attempts;
 
   if (shouldRetry) {
     const scheduledAt = new Date(Date.now() + getRetryDelayMs(job.attempt_count)).toISOString();

@@ -152,7 +152,11 @@ describe("/api/integrations/ringba/pixel", () => {
     });
 
     const response = await GET(
-      createApiContext(new Request("http://localhost/api/integrations/ringba/pixel?api_key=ringba_live_key"))
+      createApiContext(
+        new Request(
+          "http://localhost/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=2026-04-11T00%3A00%3A00.000Z&publisher_name=PubOne&buyer_name=BuyerOne"
+        )
+      )
     );
 
     expect(ingestIntegrationCalls).toHaveBeenCalledWith(admin, integration, payload, calls);
@@ -164,5 +168,52 @@ describe("/api/integrations/ringba/pixel", () => {
       rejectedCount: 0,
       eventId: "event_1",
     });
+  });
+
+  it("passes the full Ringba query string to the Ringba parser", async () => {
+    const admin = { name: "admin" };
+    const integration = {
+      id: "integration_1",
+      organizationId: "org_1",
+      provider: "ringba",
+      displayName: "Ringba Primary",
+      config: {},
+    };
+    getAdminSupabase.mockReturnValue(admin);
+    parseRingbaPixelRequest.mockReturnValue({
+      apiKey: "ringba_live_key",
+      payload: { provider: "ringba", platform: "ringba", calls: [{ callerNumber: "+15555550123" }] },
+      calls: [{ callerNumber: "+15555550123" }],
+      durationSeconds: 61,
+    });
+    loadIntegrationContextByRingbaPublicIngestKey.mockResolvedValue(integration);
+    getRingbaMinimumDurationSeconds.mockReturnValue(30);
+    ingestIntegrationCalls.mockResolvedValue({
+      statusCode: 200,
+      ingestedCount: 1,
+      rejectedCount: 0,
+      eventId: "event_1",
+    });
+
+    await GET(
+      createApiContext(
+        new Request(
+          "http://localhost/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=2026-04-11T00%3A00%3A00.000Z&publisher_name=PubOne&buyer_name=BuyerOne"
+        )
+      )
+    );
+
+    expect(parseRingbaPixelRequest).toHaveBeenCalledTimes(1);
+    const parsedUrl = parseRingbaPixelRequest.mock.calls[0]?.[0] as URL;
+    expect(parsedUrl.searchParams.get("api_key")).toBe("ringba_live_key");
+    expect(parsedUrl.searchParams.get("platform")).toBe("ringba");
+    expect(parsedUrl.searchParams.get("call_id")).toBe("call_123");
+    expect(parsedUrl.searchParams.get("caller_number")).toBe("+15555550123");
+    expect(parsedUrl.searchParams.get("duration_seconds")).toBe("61");
+    expect(parsedUrl.searchParams.get("recording_url")).toBe("https://example.com/recording.mp3");
+    expect(parsedUrl.searchParams.get("campaign_name")).toBe("Alpha");
+    expect(parsedUrl.searchParams.get("call_timestamp")).toBe("2026-04-11T00:00:00.000Z");
+    expect(parsedUrl.searchParams.get("publisher_name")).toBe("PubOne");
+    expect(parsedUrl.searchParams.get("buyer_name")).toBe("BuyerOne");
   });
 });

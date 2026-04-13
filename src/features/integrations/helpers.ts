@@ -147,7 +147,7 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
       label: "Needs configuration",
       description:
         integration.provider === "ringba"
-          ? "Ringba pixel setup is incomplete because the public ingest URL is not ready yet."
+          ? "Ringba pixel setup is incomplete because this integration does not have a public ingest key yet."
           : "Webhook signing is incomplete, so inbound events cannot be trusted yet.",
     };
   }
@@ -169,14 +169,20 @@ export function getIntegrationHealth(integration: IntegrationCard): IntegrationH
     return {
       state: "awaiting-first-event",
       label: "Awaiting first event",
-      description: "Configuration is present, but no successful inbound webhook has been recorded yet.",
+      description:
+        integration.provider === "ringba"
+          ? "Configuration is present, but no successful Ringba pixel event has been recorded yet."
+          : "Configuration is present, but no successful inbound webhook has been recorded yet.",
     };
   }
 
   return {
     state: "healthy",
     label: "Healthy",
-    description: "Recent signed webhook traffic has been accepted successfully.",
+    description:
+      integration.provider === "ringba"
+        ? "Recent Ringba pixel traffic has been accepted successfully."
+        : "Recent signed webhook traffic has been accepted successfully.",
   };
 }
 

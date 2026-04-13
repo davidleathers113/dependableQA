@@ -107,16 +107,16 @@ export function getRingbaWizardSteps(): RingbaWizardStepContent[] {
     },
     {
       sectionLabel: "Step 1: Create the pixel",
-      title: "Copy the complete webhook URL",
-      description: "Use this Ringba-ready URL in the Ringba URL field.",
-      codeLabel: "Complete Webhook URL",
+      title: "Copy the complete pixel URL",
+      description: "Use this Ringba-ready pixel URL in the Ringba URL field.",
+      codeLabel: "Complete Pixel URL",
       showCopyButton: true,
       emphasis: "This URL already includes the public ingest key plus the required Ringba query-string placeholders.",
     },
     {
       sectionLabel: "Step 1: Create the pixel",
       title: "Paste the URL into Ringba",
-      description: "Paste the complete webhook URL into the Ringba URL field.",
+      description: "Paste the complete pixel URL into the Ringba URL field.",
     },
     {
       sectionLabel: "Step 1: Create the pixel",
