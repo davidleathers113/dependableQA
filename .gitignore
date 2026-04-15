@@ -75,3 +75,5 @@ firebase-adminsdk*.json
 
 # Merge leftovers
 *.orig
+
+.early.coverage

@@ -1,8 +1,19 @@
 import { defineConfig, envField } from 'astro/config';
 import netlify from '@astrojs/netlify';
 import tailwindcss from "@tailwindcss/vite";
+import { loadEnv } from "vite";
 
 import react from '@astrojs/react';
+
+/**
+ * Middleware and several modules read `process.env` directly. Astro's typed
+ * `env.schema` wires values through `astro:env/*`, which does not always
+ * mirror `process.env` in dev (e.g. plain `npm run dev` without exporting
+ * variables in the shell). Merge Vite's `.env` loading once at startup so
+ * `SUPABASE_*` and other keys match what `astro:env/client` sees.
+ */
+const nodeEnv = process.env.NODE_ENV ?? "development";
+Object.assign(process.env, loadEnv(nodeEnv, process.cwd(), ""));
 
 export default defineConfig({
   env: {

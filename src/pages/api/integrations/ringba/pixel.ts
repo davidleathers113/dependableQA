@@ -41,6 +41,8 @@ function buildRejectedRingbaPixelPayload(requestUrl: URL, message: string) {
       duration_seconds: getQueryValue(searchParams, "duration_seconds"),
       campaign_name: getQueryValue(searchParams, "campaign_name"),
       call_timestamp: getQueryValue(searchParams, "call_timestamp"),
+      call_connection_dt: getQueryValue(searchParams, "call_connection_dt"),
+      callConnectionDt: getQueryValue(searchParams, "callConnectionDt"),
       publisher_name: getQueryValue(searchParams, "publisher_name"),
       buyer_name: getQueryValue(searchParams, "buyer_name"),
       caller_number_present: Boolean(getQueryValue(searchParams, "caller_number")),

@@ -84,6 +84,8 @@ function createIntegrationsAdminClient(
         return {
           data: {
             id: "integration_1",
+            organization_id: "org_1",
+            provider: "ringba",
             display_name: "Primary Integration",
             config: existingConfig,
           },
@@ -99,6 +101,8 @@ function createIntegrationsAdminClient(
         return {
           data: {
             id: "integration_1",
+            organization_id: "org_1",
+            provider: "ringba",
             display_name: options?.insertedDisplayName ?? "Primary Integration",
             config: existingConfig,
           },
@@ -109,6 +113,8 @@ function createIntegrationsAdminClient(
       return {
         data: {
           id: "integration_1",
+          organization_id: "org_1",
+          provider: "ringba",
           display_name: "Primary Integration",
           config: existingConfig,
         },
@@ -641,5 +647,31 @@ describe("/api/settings/integrations", () => {
     ).toBe(true);
 
     expect(response.status).toBe(200);
+  });
+
+  it("returns 400 when update-ringba-api receives an invalid IANA time zone", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "update-ringba-api",
+          integrationId: "integration_1",
+          callLogsTimeZone: "Not/AZone",
+          ringbaAccountId: "RA_test",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: string };
+    expect(body.error).toContain("IANA");
   });
 });

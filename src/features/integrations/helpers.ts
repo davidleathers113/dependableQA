@@ -231,6 +231,8 @@ export function getRingbaPixelUrl({
     "recording_url=[Call:RecordingUrl]",
     "campaign_name=[tag:Campaign:Name]",
     "call_timestamp=[Call:CallConnectedTimestamp]",
+    // Backup when [Call:CallConnectedTimestamp] is empty for some pixel triggers; parser uses first non-empty time param.
+    "call_connection_dt=[Call:CallConnectionDt]",
   ];
 
   if (includePublisher) {

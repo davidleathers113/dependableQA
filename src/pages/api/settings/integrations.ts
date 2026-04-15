@@ -9,11 +9,15 @@ import {
 import { requireApiSession } from "../../../lib/auth/request-session";
 import { getAdminSupabase } from "../../../lib/supabase/admin-client";
 import {
+  DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
+  isValidIanaTimeZone,
   normalizeIntegrationRingbaConfigInput,
   normalizeIntegrationWebhookAuthInput,
   type IntegrationWebhookAuthType,
 } from "../../../lib/integration-config";
 import type { TablesInsert } from "../../../../supabase/types";
+import { loadIntegrationContext } from "../../../server/integration-ingest";
+import { runRingbaApiSyncForIntegration } from "../../../server/ringba-api-sync";
 import { sendIntegrationTestEvent } from "../../../server/integration-test-event";
 
 export const prerender = false;
@@ -183,7 +187,7 @@ export const POST: APIRoute = async (context) => {
 
     const existing = await admin
       .from("integrations")
-      .select("id, display_name, config")
+      .select("id, display_name, config, provider")
       .eq("organization_id", session.organization.id)
       .eq("id", integrationId)
       .maybeSingle();
@@ -249,6 +253,110 @@ export const POST: APIRoute = async (context) => {
       });
 
       message = "Webhook security settings saved.";
+    } else if (action === "update-ringba-api") {
+      const rowProvider = normalizeProvider((existing.data as { provider?: unknown }).provider);
+      if (rowProvider !== "ringba") {
+        return json({ error: "This action only applies to Ringba integrations." }, 400);
+      }
+
+      const ringbaAccountId = asString(body.ringbaAccountId);
+      const apiAccessToken = asString(body.apiAccessToken);
+      const callLogsTimeZone = asString(body.callLogsTimeZone);
+      const pollRaw = body.pollIntervalMinutes;
+      const lookRaw = body.lookbackHours;
+      const pollIntervalMinutes =
+        pollRaw === undefined || pollRaw === null ? undefined : Number(pollRaw);
+      const lookbackHours = lookRaw === undefined || lookRaw === null ? undefined : Number(lookRaw);
+
+      if (callLogsTimeZone && !isValidIanaTimeZone(callLogsTimeZone)) {
+        return json(
+          { error: "callLogsTimeZone must be a valid IANA time zone (for example America/Chicago)." },
+          400
+        );
+      }
+
+      if (
+        pollIntervalMinutes !== undefined &&
+        (!Number.isFinite(pollIntervalMinutes) || pollIntervalMinutes <= 0)
+      ) {
+        return json({ error: "pollIntervalMinutes must be a positive number." }, 400);
+      }
+
+      if (lookbackHours !== undefined && (!Number.isFinite(lookbackHours) || lookbackHours <= 0)) {
+        return json({ error: "lookbackHours must be a positive number." }, 400);
+      }
+
+      const rawEnabled = body.ringbaApiSyncEnabled;
+      const ringbaApiSyncEnabled =
+        rawEnabled === undefined || rawEnabled === null ? undefined : Boolean(rawEnabled);
+
+      const nextConfig = normalizeIntegrationRingbaConfigInput(existing.data.config, {
+        ringbaApiSyncEnabled,
+        ringbaAccountId,
+        apiAccessToken,
+        callLogsTimeZone: callLogsTimeZone || undefined,
+        pollIntervalMinutes:
+          pollIntervalMinutes === undefined ? undefined : Math.floor(pollIntervalMinutes),
+        lookbackHours: lookbackHours === undefined ? undefined : Math.floor(lookbackHours),
+      });
+
+      const updateResult = await admin
+        .from("integrations")
+        .update({
+          config: nextConfig,
+        })
+        .eq("organization_id", session.organization.id)
+        .eq("id", integrationId);
+
+      if (updateResult.error) {
+        return json({ error: updateResult.error.message }, 500);
+      }
+
+      await insertAuditLog(admin, {
+        organizationId: session.organization.id,
+        actorUserId: session.user.id,
+        entityType: "integration",
+        entityId: integrationId,
+        action: "integration.config.updated",
+        metadata: {
+          summary: `Updated Ringba API sync settings for ${asString(existing.data.display_name) || "integration"}.`,
+          ringbaApiSyncEnabled: ringbaApiSyncEnabled ?? null,
+          ringbaAccountIdPresent: ringbaAccountId.length > 0,
+          tokenUpdated: apiAccessToken.length > 0,
+          callLogsTimeZone: callLogsTimeZone || DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
+        },
+      });
+
+      message = "Ringba API sync settings saved.";
+    } else if (action === "sync-ringba-api") {
+      const integration = await loadIntegrationContext(admin, integrationId);
+      if (!integration || integration.provider !== "ringba") {
+        return json({ error: "Ringba integration not found." }, 404);
+      }
+
+      const outcome = await runRingbaApiSyncForIntegration(admin, integration, { manual: true });
+      if (!outcome.ok) {
+        return json({ error: outcome.error ?? "Ringba API sync failed." }, 400);
+      }
+
+      if (outcome.skipped) {
+        message = "Sync was skipped.";
+      } else {
+        message = `Ringba API sync finished. Ingested ${outcome.ingestedCount} call(s).`;
+      }
+
+      await insertAuditLog(admin, {
+        organizationId: session.organization.id,
+        actorUserId: session.user.id,
+        entityType: "integration",
+        entityId: integrationId,
+        action: "integration.ringba_api.manual_sync",
+        metadata: {
+          summary: message,
+          ingestedCount: outcome.ingestedCount,
+          skipped: outcome.skipped ?? false,
+        },
+      });
     } else if (action === "send-test-event") {
       try {
         const result = await sendIntegrationTestEvent(admin, integrationId);

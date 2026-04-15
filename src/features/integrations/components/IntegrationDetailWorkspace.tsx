@@ -7,6 +7,7 @@ import { IntegrationHealthPanel } from "./IntegrationHealthPanel";
 import { IntegrationProviderIcon } from "./IntegrationProviderIcon";
 import { IntegrationSecurityPanel } from "./IntegrationSecurityPanel";
 import { IntegrationSetupPanel } from "./IntegrationSetupPanel";
+import { RingbaApiSyncPanel, type RingbaApiSyncFormInput } from "./RingbaApiSyncPanel";
 
 interface Props {
   currentUserRole: string;
@@ -100,6 +101,74 @@ export function IntegrationDetailWorkspace({
     onError: (error) => {
       setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "We couldn’t save these settings. Check the values and try again.");
+    },
+  });
+
+  const ringbaApiMutation = useMutation({
+    mutationFn: async (input: RingbaApiSyncFormInput) => {
+      const response = await fetch("/api/settings/integrations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "update-ringba-api",
+          integrationId: integration.id,
+          ringbaApiSyncEnabled: input.ringbaApiSyncEnabled,
+          ringbaAccountId: input.ringbaAccountId,
+          apiAccessToken: input.apiAccessToken,
+          callLogsTimeZone: input.callLogsTimeZone,
+          pollIntervalMinutes: input.pollIntervalMinutes,
+          lookbackHours: input.lookbackHours,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "We couldn’t save Ringba API settings.");
+      }
+
+      return payload;
+    },
+    onSuccess: async (payload) => {
+      setErrorMessage("");
+      setSuccessMessage(payload.message ?? "Ringba API settings saved.");
+      await queryClient.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (error) => {
+      setSuccessMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "We couldn’t save Ringba API settings.");
+    },
+  });
+
+  const ringbaSyncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/settings/integrations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "sync-ringba-api",
+          integrationId: integration.id,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Ringba API sync failed.");
+      }
+
+      return payload;
+    },
+    onSuccess: async (payload) => {
+      setErrorMessage("");
+      setSuccessMessage(payload.message ?? "Ringba API sync completed.");
+      await queryClient.invalidateQueries({ queryKey: ["integrations", organizationId] });
+    },
+    onError: (error) => {
+      setSuccessMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Ringba API sync failed.");
     },
   });
 
@@ -215,6 +284,17 @@ export function IntegrationDetailWorkspace({
           onLaunchWizard={onLaunchWizard}
         />
       </div>
+      {integration.provider === "ringba" ? (
+        <RingbaApiSyncPanel
+          integration={integration}
+          canManage={canManage}
+          isSaving={ringbaApiMutation.isPending}
+          isCreating={isCreatingIntegration}
+          isSyncing={ringbaSyncMutation.isPending}
+          onSave={(input) => ringbaApiMutation.mutate(input)}
+          onSyncNow={() => ringbaSyncMutation.mutate()}
+        />
+      ) : null}
       {integration.provider !== "ringba" ? (
         <IntegrationSecurityPanel
           canManage={canManage}

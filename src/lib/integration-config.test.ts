@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
   DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS,
+  RINGBA_API_LOOKBACK_DEFAULT_HOURS,
+  RINGBA_API_POLL_INTERVAL_DEFAULT_MINUTES,
   getPublicIntegrationRingbaConfig,
   getPublicIntegrationWebhookAuth,
+  mergeRingbaApiLastSyncAt,
   normalizeIntegrationRingbaConfigInput,
   normalizeIntegrationWebhookAuthInput,
 } from "./integration-config";
@@ -63,6 +67,13 @@ describe("integration-config", () => {
     expect(getPublicIntegrationRingbaConfig({})).toEqual({
       publicIngestKey: "",
       minimumDurationSeconds: DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS,
+      ringbaApiSyncEnabled: false,
+      ringbaAccountId: "",
+      apiTokenConfigured: false,
+      callLogsTimeZone: DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
+      pollIntervalMinutes: RINGBA_API_POLL_INTERVAL_DEFAULT_MINUTES,
+      lookbackHours: RINGBA_API_LOOKBACK_DEFAULT_HOURS,
+      lastRingbaApiSyncAt: null,
     });
   });
 
@@ -92,5 +103,33 @@ describe("integration-config", () => {
       publicIngestKey: "ringba_live_key",
       minimumDurationSeconds: 45,
     });
+  });
+
+  it("retains Ringba API token when the incoming token is blank", () => {
+    const nextConfig = normalizeIntegrationRingbaConfigInput(
+      {
+        ringba: {
+          publicIngestKey: "ringba_live_key",
+          apiAccessToken: "secret-token",
+          minimumDurationSeconds: 30,
+        },
+      },
+      {
+        apiAccessToken: "",
+        ringbaAccountId: "RA_account",
+      }
+    ) as Record<string, unknown>;
+
+    const ringba = nextConfig.ringba as Record<string, unknown>;
+    expect(ringba.apiAccessToken).toBe("secret-token");
+    expect(ringba.ringbaAccountId).toBe("RA_account");
+  });
+
+  it("merges last Ringba API sync timestamp into config", () => {
+    const merged = mergeRingbaApiLastSyncAt(
+      { ringba: { publicIngestKey: "k" } },
+      "2026-04-13T12:00:00.000Z"
+    ) as Record<string, unknown>;
+    expect((merged.ringba as Record<string, unknown>).lastRingbaApiSyncAt).toBe("2026-04-13T12:00:00.000Z");
   });
 });

@@ -8,5 +8,8 @@
 [functions."ai-dispatch-scheduled"]
   schedule = "*/2 * * * *"
 
+[functions."ringba-api-sync-scheduled"]
+  schedule = "*/5 * * * *"
+
 [template]
   required-extensions = ["supabase"]

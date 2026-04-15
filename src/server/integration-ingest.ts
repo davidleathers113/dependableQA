@@ -318,25 +318,59 @@ function parseUnixTimestamp(value: string) {
   return null;
 }
 
-function requireRingbaDateValue(searchParams: URLSearchParams, key: string) {
-  const value = requireQueryValue(searchParams, key);
-  const unixTimestamp = parseUnixTimestamp(value);
+/** Query keys Ringba may populate for “when did this call start / connect” (first non-empty wins). */
+const RINGBA_PIXEL_START_TIME_QUERY_KEYS = [
+  "call_timestamp",
+  "call_connection_dt",
+  "callConnectionDt",
+  "call_connected_timestamp",
+  "call_connected_dt",
+] as const;
+
+function parseRingbaDateStringForPixel(rawValue: string, labelForErrors: string) {
+  const unixTimestamp = parseUnixTimestamp(rawValue);
   if (unixTimestamp && !Number.isNaN(unixTimestamp.getTime())) {
     return {
       isoValue: unixTimestamp.toISOString(),
-      rawValue: value,
+      rawValue: rawValue,
     };
   }
 
-  const parsed = new Date(value);
+  const parsed = new Date(rawValue);
   if (Number.isNaN(parsed.getTime())) {
-    throw new Error(`${key} must be a valid date/time value.`);
+    throw new Error(`${labelForErrors} must be a valid date/time value.`);
   }
 
   return {
     isoValue: parsed.toISOString(),
-    rawValue: value,
+    rawValue: rawValue,
   };
+}
+
+function requireRingbaPixelStartedAt(searchParams: URLSearchParams) {
+  let lastParseError: Error | null = null;
+
+  for (const key of RINGBA_PIXEL_START_TIME_QUERY_KEYS) {
+    const raw = asString(searchParams.get(key));
+    if (!raw) {
+      continue;
+    }
+
+    try {
+      return parseRingbaDateStringForPixel(raw, key);
+    } catch (error) {
+      lastParseError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  if (lastParseError) {
+    throw lastParseError;
+  }
+
+  throw new Error(
+    `Ringba pixel is missing call time: none of the query parameters ${RINGBA_PIXEL_START_TIME_QUERY_KEYS.join(", ")} had a usable value. ` +
+      "Ringba often leaves [Call:CallConnectedTimestamp] empty depending on when the pixel fires; add call_connection_dt=[Call:CallConnectionDt] to the URL or adjust the pixel trigger (e.g. Recording or Completed)."
+  );
 }
 
 export function getRingbaMinimumDurationSeconds(integration: IntegrationContext) {
@@ -354,7 +388,7 @@ export function parseRingbaPixelRequest(requestUrl: URL) {
     requireQueryValue(requestUrl.searchParams, "duration_seconds"),
     "duration_seconds"
   );
-  const startedAt = requireRingbaDateValue(requestUrl.searchParams, "call_timestamp");
+  const startedAt = requireRingbaPixelStartedAt(requestUrl.searchParams);
 
   const normalizedCall: Record<string, unknown> = {
     externalCallId: requireQueryValue(requestUrl.searchParams, "call_id"),
@@ -504,12 +538,16 @@ export async function recordIntegrationFailure(
   return eventId;
 }
 
+export type IngestIntegrationCallsCompletionKind = "webhook" | "ringba_api";
+
 export async function ingestIntegrationCalls(
   client: SupabaseAny,
   integration: IntegrationContext,
   payload: Record<string, unknown>,
-  calls: Array<Record<string, unknown>>
+  calls: Array<Record<string, unknown>>,
+  ingestOptions?: { completionEventKind?: IngestIntegrationCallsCompletionKind }
 ) {
+  const completionKind: IngestIntegrationCallsCompletionKind = ingestOptions?.completionEventKind ?? "webhook";
   const processingErrors: Array<{ index: number; error: string }> = [];
   let ingestedCount = 0;
 
@@ -580,11 +618,18 @@ export async function ingestIntegrationCalls(
       }
 
       const callId = asString((callInsert.data as Record<string, unknown>).id);
+      const ingestionMode = asString(payload.ingestionMode);
+      let sourceKind: Database["public"]["Enums"]["source_kind"] = "webhook";
+      if (ingestionMode === "pixel") {
+        sourceKind = "pixel";
+      } else if (ingestionMode === "api") {
+        sourceKind = "api";
+      }
       const snapshotValues: TablesInsert<"call_source_snapshots"> = {
         organization_id: integration.organizationId,
         call_id: callId,
         source_provider: integration.provider,
-        source_kind: payload.ingestionMode === "pixel" ? "pixel" : "webhook",
+        source_kind: sourceKind,
         raw_payload: callPayload as Json,
         normalized_payload: callPayload as Json,
       };
@@ -661,11 +706,17 @@ export async function ingestIntegrationCalls(
   }
 
   const eventType =
-    processingErrors.length > 0
-      ? ingestedCount > 0
-        ? "webhook.partial"
-        : "webhook.failed"
-      : "webhook.processed";
+    completionKind === "ringba_api"
+      ? processingErrors.length > 0
+        ? ingestedCount > 0
+          ? "ringba.api.sync_partial"
+          : "ringba.api.sync_failed"
+        : "ringba.api.sync_completed"
+      : processingErrors.length > 0
+        ? ingestedCount > 0
+          ? "webhook.partial"
+          : "webhook.failed"
+        : "webhook.processed";
   const message =
     processingErrors.length > 0
       ? `Processed ${ingestedCount} calls for ${integration.displayName} with ${processingErrors.length} rejected payloads.`
@@ -676,7 +727,7 @@ export async function ingestIntegrationCalls(
     message,
     severity,
     payload: {
-      eventType: asString(payload.eventType) || "webhook.received",
+      eventType: asString(payload.eventType) || (completionKind === "ringba_api" ? "ringba.api.sync" : "webhook.received"),
       callsReceived: calls.length,
       callsIngested: ingestedCount,
       errors: processingErrors,
@@ -700,7 +751,7 @@ export async function ingestIntegrationCalls(
     actorUserId: null,
     entityType: "integration",
     entityId: integration.id,
-    action: "integration.webhook.ingested",
+    action: completionKind === "ringba_api" ? "integration.ringba_api.ingested" : "integration.webhook.ingested",
     metadata: {
       summary: message,
       eventId,

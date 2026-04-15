@@ -111,6 +111,8 @@ describe("/api/integrations/ringba/pixel", () => {
           duration_seconds: "61",
           campaign_name: "Alpha",
           call_timestamp: "not-a-date",
+          call_connection_dt: "",
+          callConnectionDt: "",
           publisher_name: "PubOne",
           buyer_name: "BuyerOne",
           caller_number_present: true,

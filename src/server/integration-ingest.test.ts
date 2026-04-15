@@ -242,6 +242,32 @@ describe("parseRingbaPixelRequest", () => {
     ).toThrow("call_timestamp must be a valid date/time value.");
   });
 
+  it("uses call_connection_dt when call_timestamp is absent (Ringba empty token fallback)", () => {
+    const parsed = parseRingbaPixelRequest(
+      new URL(
+        "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_connection_dt=2026-04-11T00%3A00%3A00.000Z"
+      )
+    );
+
+    expect(parsed.payload.calls[0]).toMatchObject({
+      startedAt: "2026-04-11T00:00:00.000Z",
+      rawCallTimestamp: "2026-04-11T00:00:00.000Z",
+    });
+  });
+
+  it("uses call_connection_dt when call_timestamp is invalid but a later time param parses", () => {
+    const parsed = parseRingbaPixelRequest(
+      new URL(
+        "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=call_123&caller_number=%2B15555550123&duration_seconds=61&recording_url=https%3A%2F%2Fexample.com%2Frecording.mp3&campaign_name=Alpha&call_timestamp=not-a-date&call_connection_dt=2026-04-11T00%3A00%3A00.000Z"
+      )
+    );
+
+    expect(parsed.payload.calls[0]).toMatchObject({
+      startedAt: "2026-04-11T00:00:00.000Z",
+      rawCallTimestamp: "2026-04-11T00:00:00.000Z",
+    });
+  });
+
   it("marks Ringba pixel snapshots with source_kind pixel", async () => {
     const integration = {
       ...createIntegration(),

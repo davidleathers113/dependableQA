@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { IntegrationCard } from "../../lib/app-data";
 import {
+  DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
+  RINGBA_API_LOOKBACK_DEFAULT_HOURS,
+  RINGBA_API_POLL_INTERVAL_DEFAULT_MINUTES,
+} from "../../lib/integration-config";
+import {
   getDiagnosticsSummary,
   getDiagnosticsSummaryLine,
   getIntegrationHealth,
@@ -11,7 +16,26 @@ import {
   getSecretSourceLabel,
 } from "./helpers";
 
+function defaultRingbaFields(): IntegrationCard["ringba"] {
+  return {
+    publicIngestKey: "",
+    minimumDurationSeconds: 30,
+    ringbaApiSyncEnabled: false,
+    ringbaAccountId: "",
+    apiTokenConfigured: false,
+    callLogsTimeZone: DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
+    pollIntervalMinutes: RINGBA_API_POLL_INTERVAL_DEFAULT_MINUTES,
+    lookbackHours: RINGBA_API_LOOKBACK_DEFAULT_HOURS,
+    lastRingbaApiSyncAt: null,
+  };
+}
+
+function rb(overrides: Partial<IntegrationCard["ringba"]>): IntegrationCard["ringba"] {
+  return { ...defaultRingbaFields(), ...overrides };
+}
+
 function createIntegration(overrides: Partial<IntegrationCard> = {}): IntegrationCard {
+  const { ringba: ringbaOverrides, ...rest } = overrides;
   return {
     id: "integration-1",
     isConfigured: true,
@@ -31,12 +55,9 @@ function createIntegration(overrides: Partial<IntegrationCard> = {}): Integratio
       secretConfigured: false,
       secretSource: "none",
     },
-    ringba: {
-      publicIngestKey: "",
-      minimumDurationSeconds: 30,
-    },
     recentEvents: [],
-    ...overrides,
+    ...rest,
+    ringba: { ...defaultRingbaFields(), ...ringbaOverrides },
   };
 }
 
@@ -70,10 +91,10 @@ describe("integration helpers", () => {
 
   it("derives awaiting first event when auth is ready but no success exists", () => {
     const integration = createIntegration({
-      ringba: {
+      ringba: rb({
         publicIngestKey: "ringba_live_key",
         minimumDurationSeconds: 30,
-      },
+      }),
     });
     const health = getIntegrationHealth(integration);
 
@@ -90,10 +111,10 @@ describe("integration helpers", () => {
   it("derives healthy when a secret is configured and a success exists", () => {
     const health = getIntegrationHealth(
       createIntegration({
-        ringba: {
+        ringba: rb({
           publicIngestKey: "ringba_live_key",
           minimumDurationSeconds: 30,
-        },
+        }),
         lastSuccessAt: "2026-04-10T00:00:00.000Z",
       })
     );
@@ -159,10 +180,10 @@ describe("integration helpers", () => {
   it("builds summary metadata for the summary card layer", () => {
     const meta = getIntegrationSummaryMeta(
       createIntegration({
-        ringba: {
+        ringba: rb({
           publicIngestKey: "ringba_live_key",
           minimumDurationSeconds: 30,
-        },
+        }),
         lastSuccessAt: "2026-04-10T00:00:00.000Z",
       })
     );
@@ -203,10 +224,10 @@ describe("integration helpers", () => {
 
   it("surfaces recent warning activity when warnings exist without timestamps", () => {
     const integration = createIntegration({
-      ringba: {
+      ringba: rb({
         publicIngestKey: "ringba_live_key",
         minimumDurationSeconds: 30,
-      },
+      }),
       recentEvents: [
         {
           id: "event-1",
@@ -239,10 +260,10 @@ describe("integration helpers", () => {
   it("uses a warning-oriented diagnostics summary line for degraded integrations", () => {
     const line = getDiagnosticsSummaryLine(
       createIntegration({
-        ringba: {
+        ringba: rb({
           publicIngestKey: "ringba_live_key",
           minimumDurationSeconds: 30,
-        },
+        }),
         lastEventSeverity: "warning",
         recentEvents: [
           {
@@ -268,7 +289,7 @@ describe("integration helpers", () => {
         includeBuyer: false,
       })
     ).toBe(
-      "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=[Call:InboundCallId]&caller_number=[tag:InboundNumber:Number]&duration_seconds=[tag:CallLength:Total]&recording_url=[Call:RecordingUrl]&campaign_name=[tag:Campaign:Name]&call_timestamp=[Call:CallConnectedTimestamp]&publisher_name=[tag:Publisher:Name]"
+      "https://dependableqa.netlify.app/api/integrations/ringba/pixel?api_key=ringba_live_key&platform=ringba&call_id=[Call:InboundCallId]&caller_number=[tag:InboundNumber:Number]&duration_seconds=[tag:CallLength:Total]&recording_url=[Call:RecordingUrl]&campaign_name=[tag:Campaign:Name]&call_timestamp=[Call:CallConnectedTimestamp]&call_connection_dt=[Call:CallConnectionDt]&publisher_name=[tag:Publisher:Name]"
     );
   });
 
