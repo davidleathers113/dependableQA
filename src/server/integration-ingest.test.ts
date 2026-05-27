@@ -249,7 +249,7 @@ describe("parseRingbaPixelRequest", () => {
       )
     );
 
-    expect(parsed.payload.calls[0]).toMatchObject({
+    expect(parsed.calls[0]).toMatchObject({
       startedAt: "2026-04-11T00:00:00.000Z",
       rawCallTimestamp: "2026-04-11T00:00:00.000Z",
     });
@@ -262,7 +262,7 @@ describe("parseRingbaPixelRequest", () => {
       )
     );
 
-    expect(parsed.payload.calls[0]).toMatchObject({
+    expect(parsed.calls[0]).toMatchObject({
       startedAt: "2026-04-11T00:00:00.000Z",
       rawCallTimestamp: "2026-04-11T00:00:00.000Z",
     });

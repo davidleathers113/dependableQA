@@ -1,109 +1,55 @@
-# Astro Supabase Starter
+# DependableQA
 
-![Astro Supabase Starter Preview](astro-supabase-starter-preview.png)
+DependableQA is a multi-tenant **call-QA operations system**. It ingests call records (CSV upload, Ringba webhook/pixel, or scheduled Ringba API sync), transcribes and AI-analyzes them with OpenAI, and gives reviewers a workspace to listen, follow a synchronized transcript, flag exact moments, and disposition calls — with a full audit trail behind every decision.
 
-**View demo:** [https://astro-supabase-starter.netlify.app/](https://astro-supabase-starter.netlify.app/)
+Built on **Astro 5 (SSR) + React 19 islands + Supabase (Postgres 17) + Tailwind v4 + Netlify functions**, with Stripe for billing.
 
-The Astro Supabase starter demonstrates how to integrate **Supabase** into an Astro project deployed on Netlify.
+> Status: in active development. See the latest [readiness snapshot](docs/status-2026-04-13.md) for known blockers before relying on this in production.
 
-## Deploying to Netlify
+## Quickstart
 
-If you click "Deploy to Netlify" button, it will create a new repo for you that looks exactly like this one, and sets that repo up immediately for deployment on Netlify.
-
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/netlify-templates/astro-supabase-starter&fullConfiguration=true)
-
-## Astro Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## Developing Locally
-
-| Prerequisites                                                                |
-| :--------------------------------------------------------------------------- |
-| [Node.js](https://nodejs.org/) v18.14+                                       |
-| (optional) [nvm](https://github.com/nvm-sh/nvm) for Node version management  |
-| [Netlify account](https://netlify.com/)                                      |
-| [Netlify CLI](https://docs.netlify.com/cli/get-started/).                    |
-| [Supabase account](https://supabase.com/)                                    |
-
-### Set up the database
-
-To use this template, you’ll need to set up and seed a new Supabase database.
-
-1. Create a new Supabase project.
-2. Run the SQL commands found in the `supabase/migrations` directory in the Supabase UI.
-3. To seed the database with data, you can import the contents of the `supabase/seed.csv` file in the Supabase UI.
-
-ℹ️ _Note: This project uses the documented Supabase names `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`. If you connect the site through the Netlify Supabase integration, the app also accepts Netlify's `SUPABASE_DATABASE_URL` as a fallback for `SUPABASE_URL` during deployment and local `netlify dev` usage._
-
-### Install and run locally
-
-1. Clone this repository, then run `npm install` in its root directory.
-
-2. For the starter to have full functionality locally, please ensure you have an up-to-date version of Netlify CLI. Run:
-
-```
-npm install netlify-cli@latest -g
-```
-
-3. Link your local repository to the deployed Netlify site. This will ensure you're using the same runtime version for both local development and your deployed site.
-
-```
-netlify link
-```
-
-4. Then, run the Astro.js development server via Netlify CLI:
-
-```
+```bash
+npm install
+cp .env-example .env     # then fill in real values (see docs/environment.md)
 netlify dev --target-port 4321
 ```
 
-If your browser doesn't navigate to the site automatically, visit [localhost:8888](http://localhost:8888).
+`netlify dev` serves the app on `http://localhost:8888` **with function emulation** (AI dispatch, webhooks, Stripe, ingest). `npm run dev` runs Astro alone on `:4321` — fine for UI work, but background functions won't run. Full setup: [docs/getting-started.md](docs/getting-started.md).
 
-## Release Guardrails
+## Release gate
 
-Run the full verification gate before shipping changes:
+Run before every commit and deploy — it's the same command Netlify and CI use:
 
 ```bash
-npm run ci:verify
+npm run ci:verify   # check:env-example → check:migrations → test → build
 ```
 
-This runs:
+| Command | Action |
+|---|---|
+| `npm run dev` | Astro dev server on `:4321` (no functions) |
+| `netlify dev --target-port 4321` | Full local app on `:8888` with functions |
+| `npm test` / `npm run test:watch` | Vitest |
+| `npm run build` | `astro check && astro build` |
+| `npm run ci:verify` | Full release gate |
 
-- `npm run check:env-example`
-- `npm run check:migrations`
-- `npm test`
-- `npm run build`
+## Documentation
 
-## Migration Workflow
+Full docs live in [`docs/`](docs/README.md):
 
-Treat the SQL files in `supabase/migrations` as the source of truth.
+- [Getting Started](docs/getting-started.md) · [Architecture](docs/architecture.md) · [Data Model](docs/data-model.md)
+- [AI Pipeline](docs/ai-pipeline.md) · [Integrations](docs/integrations.md) · [Operations](docs/operations.md)
+- [Environment Variables](docs/environment.md) · [Testing](docs/testing.md)
+- [Architecture Decision Records](docs/decisions/) · [Product PRD & Spec](docs/product/)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) · [`CHANGELOG.md`](CHANGELOG.md)
 
-1. Add a new numbered SQL migration in `supabase/migrations`.
-2. Apply that migration to the target Supabase project using the Supabase CLI or the configured Supabase MCP tooling.
-3. Regenerate `supabase/types.ts` after schema changes.
-4. Run `npm run ci:verify` before deploy.
+Project guidance for Claude Code is in [`CLAUDE.md`](CLAUDE.md).
 
-Avoid applying schema-only changes manually in the Supabase UI without also committing a matching migration file.
+## Hard rules
 
-## Background AI Operations
+- **No regex anywhere** — use Zod and string methods ([ADR 0003](docs/decisions/0003-no-regex-zod-only-policy.md)).
+- **Migrations are the schema source of truth** — never edit schema in the Supabase UI without a committed migration ([ADR 0004](docs/decisions/0004-migrations-as-source-of-truth.md)).
+- **The service-role client bypasses RLS** — always scope queries by `organization_id` in those paths ([ADR 0002](docs/decisions/0002-three-supabase-clients-and-tenant-isolation.md)).
 
-The AI queue is processed by:
+## License
 
-- `netlify/functions/ai-dispatch.ts` for protected manual dispatch
-- `netlify/functions/ai-dispatch-scheduled.ts` for scheduled processing
-
-The scheduled worker is configured in `netlify.toml`, and the manual worker requires `AI_DISPATCH_SHARED_SECRET`.
-
-## Support
-
-If you get stuck along the way, get help in our [support forums](https://answers.netlify.com/).
+See [LICENSE](LICENSE).
