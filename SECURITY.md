@@ -39,4 +39,10 @@ Dependency updates are automated via Renovate (`renovate.json`). Review and merg
 
 ## Known gaps
 
-The [readiness snapshot](docs/status-2026-04-13.md) tracks open security-relevant items: Stripe webhook credit idempotency, `import-dispatch` trusting body-supplied `organizationId`, `ai_jobs` RLS-without-policies, `getSession()` vs a verified-user server pattern, and Supabase Auth leaked-password protection being disabled. These are documented and prioritized, not yet resolved — factor them in before unrestricted production use.
+The [current readiness snapshot](docs/status-2026-05-29.md) tracks security-relevant items.
+
+**Resolved (Phase 1, 2026-05-29):** Stripe webhook credit idempotency is now enforced by a transactional, dedup-guarded RPC (migration `0009`); the `import-dispatch` Netlify function that trusted a body-supplied `organizationId` under the service-role client was removed.
+
+**Still open:** `ai_jobs` RLS-without-policies (intentional service-role-only — to be documented/tested), `organizations` overly permissive insert policy, `getSession()` vs a verified-user server pattern on protected paths, and Supabase Auth leaked-password protection being disabled. These are documented and prioritized — factor them in before unrestricted production use.
+
+**Invariant (wallet ledger):** any code that inserts `wallet_ledger_entries` must first lock the corresponding `billing_accounts` row (`SELECT … FOR UPDATE`), as `apply_stripe_recharge_event` does. The running balance is derived from the latest ledger row, so an unlocked writer could reintroduce a lost-update race.

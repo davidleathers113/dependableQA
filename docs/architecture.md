@@ -79,7 +79,7 @@ Because admin-client paths bypass RLS, **tenant isolation in those paths depends
 Background work runs as Netlify functions, not in request handlers. See [`docs/operations.md`](operations.md) for schedules and [`docs/integrations.md`](integrations.md) for the ingest paths.
 
 - **Scheduled** (configured in `netlify.toml`): `ai-dispatch-scheduled` (every 2 min, drains the AI job queue) and `ringba-api-sync-scheduled` (every 5 min, polls Ringba call logs).
-- **Protected / webhook**: `ai-dispatch`, `import-dispatch`, `integration-ingest`, `stripe-webhook`. Each authenticates with a shared-secret header (timing-safe compare via `src/server/netlify-request.ts`) or a provider signature.
+- **Protected / webhook**: `ai-dispatch`, `integration-ingest`, `stripe-webhook`. Each authenticates with a shared-secret header (timing-safe compare via `src/server/netlify-request.ts`) or a provider signature. (CSV import dispatch is the session-guarded API route `/api/imports/dispatch`, which calls `src/server/import-dispatch.ts` directly — the standalone `import-dispatch` Netlify function was removed in Phase 1.)
 
 ## Roles & permissions
 

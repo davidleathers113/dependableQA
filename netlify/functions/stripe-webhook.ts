@@ -136,6 +136,8 @@ export async function handler(event: {
       // The processed_stripe_events PK makes duplicate deliveries a no-op, and a
       // `for update` lock on the billing account serializes concurrent recharges,
       // so the read-compute-insert of the running balance cannot race.
+      // INVARIANT: any other code that writes wallet_ledger_entries must take the
+      // same billing_accounts FOR UPDATE lock first (see docs/data-model.md).
       const rechargeResult = await admin.rpc("apply_stripe_recharge_event", {
         p_stripe_event_id: stripeEvent.id,
         p_event_type: stripeEvent.type,

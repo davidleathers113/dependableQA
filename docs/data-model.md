@@ -29,6 +29,7 @@ Current migrations:
 | `0006_billing_payment_method_sync.sql` | Stripe payment-method columns on `billing_accounts` |
 | `0007_ai_pipeline.sql` | `ai_jobs` queue; transcription/analysis status columns on `calls` |
 | `0008_call_review_workspace.sql` | `call_review_notes`; time-bound columns on `call_flags` |
+| `0009_stripe_event_idempotency.sql` | `processed_stripe_events` (Stripe dedup); `wallet_ledger_entries.stripe_event_id`; `apply_stripe_recharge_event` RPC |
 
 ## The three layers
 
@@ -54,7 +55,13 @@ RLS is the backstop. Many server paths use the **service-role admin client, whic
 
 ## Deduplication
 
-Source imports use a deterministic duplicate guard (`organization_id` + `source_provider` + `external_call_id`, or a composite fallback) so re-delivered or re-imported calls don't inflate metrics.
+Source imports use a deterministic duplicate guard (`organization_id` + `source_provider` + `external_call_id`, or a composite fallback) so re-delivered or re-imported calls don't inflate metrics. Calls also carry a unique `(organization_id, dedupe_hash)` constraint; CSV import and integration ingest both upsert on it.
+
+Stripe events are deduped by `processed_stripe_events` (PK on `stripe_event_id`), so a duplicate webhook delivery applies a wallet recharge at most once.
+
+## Wallet ledger invariant
+
+The wallet balance is **derived** — it is the `balance_after_cents` of the most recent `wallet_ledger_entries` row for an organization, not a stored column. To keep that derivation race-free, **any code that inserts a `wallet_ledger_entries` row must first lock the corresponding `billing_accounts` row with `SELECT … FOR UPDATE`** (as `apply_stripe_recharge_event` does — see `0009_stripe_event_idempotency.sql`). A future debit/adjustment/refund writer that skips this lock would reintroduce a lost-update race on the balance. If write volume grows, prefer promoting the balance to a locked column on `billing_accounts` over inferring it from the latest ledger row.
 
 ## Triggers
 
