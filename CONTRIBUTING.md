@@ -30,7 +30,7 @@ These are non-negotiable and enforced in review:
 ## Documentation
 
 - Docs live in [`docs/`](docs/README.md); add a link from [`docs/README.md`](docs/README.md) when you add a doc.
-- Every doc carries front matter with `owner` and `last-reviewed` (ISO date). Update `last-reviewed` when you materially revise a doc.
+- Topic docs carry front matter with `owner` and `last-reviewed` (ISO date); update `last-reviewed` when you materially revise one. ADRs (`docs/decisions/`), product docs (`docs/product/`), and dated point-in-time reports are exempt and start directly with a heading.
 - Point-in-time reports (status, audits) put the date in the filename and are not edited later — write a new dated file instead.
 - Use **relative links** between docs so they resolve on GitHub and locally.
 - Examples must never contain real secrets, tokens, or live project refs — use placeholders.

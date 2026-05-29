@@ -2389,15 +2389,17 @@ function summarizeBillingAuditEvent(row: Record<string, unknown>): BillingEventS
   return null;
 }
 
-export function deriveBillingRunwaySummary(input: {
-  currentBalanceCents: number;
-  rechargeThresholdCents: number;
-  autopayEnabled: boolean;
-  ledger: Array<Pick<BillingLedgerEntrySummary, "amountCents" | "createdAt" | "entryType" | "status">>;
-}): BillingRunwaySummary {
-  const now = Date.now();
+export function deriveBillingRunwaySummary(
+  input: {
+    currentBalanceCents: number;
+    rechargeThresholdCents: number;
+    autopayEnabled: boolean;
+    ledger: Array<Pick<BillingLedgerEntrySummary, "amountCents" | "createdAt" | "entryType" | "status">>;
+  },
+  nowMs: number = Date.now()
+): BillingRunwaySummary {
   const dayMs = 24 * 60 * 60 * 1000;
-  const windowStart = now - 30 * dayMs;
+  const windowStart = nowMs - 30 * dayMs;
   const spendEntries = input.ledger.filter((entry) => {
     if (entry.amountCents >= 0) {
       return false;
@@ -2407,45 +2409,45 @@ export function deriveBillingRunwaySummary(input: {
     return Number.isFinite(createdAtMs) && createdAtMs >= windowStart;
   });
 
-  if (spendEntries.length === 0) {
-    return {
-      projectedDaysRemaining: null,
-      averageDailySpendCents: null,
-      estimatedNextRechargeAt: null,
-    };
+  // Average daily spend requires recent (within-window) usage. When history is
+  // stale this metric is genuinely unavailable, but that must not erase the rest
+  // of the summary — every field below is resolved independently so the wallet
+  // balance and an already-due recharge still surface to the user.
+  let averageDailySpendCents: number | null = null;
+  if (spendEntries.length > 0) {
+    let oldestCreatedAt = nowMs;
+    let newestCreatedAt = nowMs;
+    let totalSpendCents = 0;
+
+    for (const entry of spendEntries) {
+      const createdAtMs = new Date(entry.createdAt).getTime();
+      oldestCreatedAt = Math.min(oldestCreatedAt, createdAtMs);
+      newestCreatedAt = Math.max(newestCreatedAt, createdAtMs);
+      totalSpendCents += Math.abs(entry.amountCents);
+    }
+
+    const observedDays = Math.max((newestCreatedAt - oldestCreatedAt) / dayMs, 1);
+    const candidate = Math.round(totalSpendCents / observedDays);
+    averageDailySpendCents = candidate > 0 ? candidate : null;
   }
 
-  let oldestCreatedAt = now;
-  let newestCreatedAt = now;
-  let totalSpendCents = 0;
+  // Projected runway exists only when we have a positive spend rate.
+  const projectedDaysRemaining =
+    averageDailySpendCents !== null
+      ? Number((Math.max(input.currentBalanceCents, 0) / averageDailySpendCents).toFixed(1))
+      : null;
 
-  for (const entry of spendEntries) {
-    const createdAtMs = new Date(entry.createdAt).getTime();
-    oldestCreatedAt = Math.min(oldestCreatedAt, createdAtMs);
-    newestCreatedAt = Math.max(newestCreatedAt, createdAtMs);
-    totalSpendCents += Math.abs(entry.amountCents);
-  }
-
-  const observedDays = Math.max((newestCreatedAt - oldestCreatedAt) / dayMs, 1);
-  const averageDailySpendCents = Math.round(totalSpendCents / observedDays);
-  if (averageDailySpendCents <= 0) {
-    return {
-      projectedDaysRemaining: null,
-      averageDailySpendCents: null,
-      estimatedNextRechargeAt: null,
-    };
-  }
-
-  const projectedDaysRemaining = Number((Math.max(input.currentBalanceCents, 0) / averageDailySpendCents).toFixed(1));
+  // Recharge timing is partly independent of spend history: with autopay on and
+  // the balance already at/below the threshold, a recharge is imminent regardless
+  // of whether recent usage data is available.
   let estimatedNextRechargeAt: string | null = null;
-
   if (input.autopayEnabled) {
     if (input.currentBalanceCents <= input.rechargeThresholdCents) {
-      estimatedNextRechargeAt = new Date(now).toISOString();
-    } else {
+      estimatedNextRechargeAt = new Date(nowMs).toISOString();
+    } else if (averageDailySpendCents !== null) {
       const centsUntilThreshold = input.currentBalanceCents - input.rechargeThresholdCents;
       const daysUntilRecharge = centsUntilThreshold / averageDailySpendCents;
-      estimatedNextRechargeAt = new Date(now + daysUntilRecharge * dayMs).toISOString();
+      estimatedNextRechargeAt = new Date(nowMs + daysUntilRecharge * dayMs).toISOString();
     }
   }
 

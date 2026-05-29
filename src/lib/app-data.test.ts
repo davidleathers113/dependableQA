@@ -86,29 +86,87 @@ describe("billing summary helpers", () => {
   });
 
   it("derives projected runway and next recharge timing from recent debits", () => {
-    const runway = deriveBillingRunwaySummary({
-      currentBalanceCents: 150000,
-      rechargeThresholdCents: 50000,
-      autopayEnabled: true,
-      ledger: [
-        {
-          amountCents: -25000,
-          createdAt: "2026-04-10T00:00:00.000Z",
-          entryType: "usage",
-          status: "applied",
-        },
-        {
-          amountCents: -25000,
-          createdAt: "2026-04-05T00:00:00.000Z",
-          entryType: "usage",
-          status: "applied",
-        },
-      ],
-    });
+    // Pin the clock near the ledger dates so the 30-day window is deterministic
+    // and the test never drifts as wall-clock time advances.
+    const nowMs = Date.parse("2026-04-12T00:00:00.000Z");
+    const runway = deriveBillingRunwaySummary(
+      {
+        currentBalanceCents: 150000,
+        rechargeThresholdCents: 50000,
+        autopayEnabled: true,
+        ledger: [
+          {
+            amountCents: -25000,
+            createdAt: "2026-04-10T00:00:00.000Z",
+            entryType: "usage",
+            status: "applied",
+          },
+          {
+            amountCents: -25000,
+            createdAt: "2026-04-05T00:00:00.000Z",
+            entryType: "usage",
+            status: "applied",
+          },
+        ],
+      },
+      nowMs
+    );
 
     expect(runway.averageDailySpendCents).toBeGreaterThan(0);
     expect(runway.projectedDaysRemaining).toBeGreaterThan(0);
     expect(runway.estimatedNextRechargeAt).not.toBeNull();
+  });
+
+  it("marks spend-derived fields unavailable when ledger history is stale", () => {
+    // Same debits, but the clock has moved well past the 30-day window, so there
+    // is no recent spend to project from. Spend-derived fields go null without
+    // throwing — the wallet balance (held by callers) remains factual.
+    const nowMs = Date.parse("2026-08-01T00:00:00.000Z");
+    const runway = deriveBillingRunwaySummary(
+      {
+        currentBalanceCents: 150000,
+        rechargeThresholdCents: 50000,
+        autopayEnabled: true,
+        ledger: [
+          {
+            amountCents: -25000,
+            createdAt: "2026-04-10T00:00:00.000Z",
+            entryType: "usage",
+            status: "applied",
+          },
+        ],
+      },
+      nowMs
+    );
+
+    expect(runway.averageDailySpendCents).toBeNull();
+    expect(runway.projectedDaysRemaining).toBeNull();
+    // Balance is above threshold and spend is unknown, so no recharge estimate.
+    expect(runway.estimatedNextRechargeAt).toBeNull();
+  });
+
+  it("still flags an imminent recharge when the balance is already below threshold despite stale spend", () => {
+    const nowMs = Date.parse("2026-08-01T00:00:00.000Z");
+    const runway = deriveBillingRunwaySummary(
+      {
+        currentBalanceCents: 40000,
+        rechargeThresholdCents: 50000,
+        autopayEnabled: true,
+        ledger: [
+          {
+            amountCents: -25000,
+            createdAt: "2026-04-10T00:00:00.000Z",
+            entryType: "usage",
+            status: "applied",
+          },
+        ],
+      },
+      nowMs
+    );
+
+    expect(runway.averageDailySpendCents).toBeNull();
+    expect(runway.projectedDaysRemaining).toBeNull();
+    expect(runway.estimatedNextRechargeAt).toBe(new Date(nowMs).toISOString());
   });
 
   it("surfaces failed recharge attempts as a critical billing state", () => {

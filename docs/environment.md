@@ -40,7 +40,7 @@ Bump the prompt/schema versions to force re-analysis (see [ai-pipeline](ai-pipel
 |---|---|---|
 | `AI_DISPATCH_SHARED_SECRET` | yes | `ai-dispatch` header secret |
 | `AI_DISPATCH_BATCH_LIMIT` | no | Default batch size (5) |
-| `IMPORT_DISPATCH_SHARED_SECRET` | yes | `import-dispatch` header secret |
+| `IMPORT_DISPATCH_SHARED_SECRET` | no | `import-dispatch` header secret; falls back to `AI_DISPATCH_SHARED_SECRET` when unset (not in `check-env-example.mjs`) |
 | `INTEGRATION_INGEST_SHARED_SECRET` | yes | Default integration webhook secret |
 | `INTEGRATION_INGEST_SIGNATURE_HEADER` | no | Default `x-dependableqa-signature` |
 | `INTEGRATION_INGEST_SIGNATURE_PREFIX` | no | Default `sha256=` |

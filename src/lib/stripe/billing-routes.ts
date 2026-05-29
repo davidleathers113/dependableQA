@@ -60,5 +60,5 @@ export async function ensureBillingRouteCustomer(input: {
 }
 
 export function getBillingReturnUrl(requestUrl: string) {
-  return `${new URL("/", requestUrl).origin}app/billing`;
+  return new URL("/app/billing", requestUrl).toString();
 }

@@ -16,7 +16,7 @@ describe("ringba-calllogs", () => {
 
   it("parses Ringba formatted callDt strings using the configured IANA zone", () => {
     const iso = parseRingbaCallDtToIso("04/13/2026 11:08:40 AM", "America/Chicago");
-    expect(iso).toMatch(/^2026-04-13T/);
+    expect(iso?.startsWith("2026-04-13T")).toBe(true);
   });
 
   it("filters out rows without recordings", () => {

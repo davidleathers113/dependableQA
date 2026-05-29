@@ -39,8 +39,9 @@ DependableQA is a multi-tenant call-QA operations system: ingest calls, transcri
 
 ## Status
 
-- [Readiness snapshot (2026-04-13)](status-2026-04-13.md) — point-in-time assessment with open risks
+- [Readiness snapshot (2026-05-29)](status-2026-05-29.md) — **current**; no-go verdict, blockers, and remediation roadmap
+- [Readiness snapshot (2026-04-13)](status-2026-04-13.md) — superseded; historical record
 
 ## Conventions
 
-Every doc carries front matter with `owner` and `last-reviewed`. Point-in-time reports put the date in the filename. Use relative links between docs. Examples must never contain real secrets or live project refs. See [`CONTRIBUTING.md`](../CONTRIBUTING.md#documentation) for the full conventions.
+Topic docs carry front matter with `owner` and `last-reviewed`. ADRs (`decisions/`), product docs (`product/`), and dated point-in-time reports are exempt and start directly with a heading (point-in-time reports put the date in the filename). Use relative links between docs. Examples must never contain real secrets or live project refs. See [`CONTRIBUTING.md`](../CONTRIBUTING.md#documentation) for the full conventions.

@@ -20,11 +20,11 @@ Calls are transcribed and analyzed asynchronously through a database-backed job 
 | Scheduled worker | `netlify/functions/ai-dispatch-scheduled.ts` (every 2 min) |
 | Manual worker | `netlify/functions/ai-dispatch.ts` (shared-secret protected) |
 
-Job types: **`transcription`** then **`analysis`**. The `calls` table carries `transcription_status` and `analysis_status` columns (`pending` → `queued` → `processing` → `completed`/`failed`) that mirror the job lifecycle.
+Job types: **`transcription`** then **`analysis`**. The `calls` table carries `transcription_status` and `analysis_status` columns (`pending` → `queued` → `processing` → `completed`/`failed`) that mirror the job lifecycle. Note the two tables use **different** vocabularies for the active state: the `calls` columns use `processing`, while the `ai_jobs` queue uses `running` (see migration `0007_ai_pipeline.sql`).
 
 ## Queue lifecycle (`src/server/ai-jobs.ts`)
 
-- **`enqueueAiJob`** — computes a `dedupe_key` from `callId` + `jobType` + normalized payload. If a job with that key already exists and is active (`queued`/`claimed`/`processing`/`retry_scheduled`), it is reused; a previously failed/terminal job is re-queued. New jobs default to `max_attempts: 3`.
+- **`enqueueAiJob`** — computes a `dedupe_key` from `callId` + `jobType` + normalized payload. If a job with that key already exists and is in a reusable state (`queued`/`claimed`/`running`/`retry_scheduled`/**`completed`**), it is reused — note a `completed` analysis at the same version key is deliberately **not** re-run (bump the analysis version to force re-analysis); only a `failed`/`cancelled` (terminal) job is re-queued. New jobs default to `max_attempts: 3`.
 - **`claimAiJobs`** — selects `queued`/`retry_scheduled` rows and marks them `claimed`, over-fetching (`limit × 3`) then claiming up to `limit`.
 - **`runAiJobs(admin, { limit, jobType })`** — the entry point the workers call. Claims, runs, and records each job; updates the call's status columns at queued/running/failed transitions; writes an audit-log entry per job via `insertAuditLog`.
 - **Retries** — on failure, `shouldRetryJob` retries unless the error is explicitly marked `retryable: false`; `getRetryDelayMs(attemptCount)` applies a backoff and the job goes to `retry_scheduled` until `max_attempts` is exhausted, then `failed`.

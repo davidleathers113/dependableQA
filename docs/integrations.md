@@ -12,12 +12,14 @@ Calls enter the system through four `source_kind`s: `csv`, `webhook`, `pixel`, a
 
 | Path | Entry point | Auth |
 |---|---|---|
-| CSV import | `/api/imports/dispatch` → `netlify/functions/import-dispatch.ts` → `src/server/import-dispatch.ts` | App session + `x-dependableqa-import-dispatch` shared secret |
+| CSV import | `/api/imports/dispatch` → `src/server/import-dispatch.ts` (`dispatchImportBatch`, called directly) | App session (org derived from session) |
 | Webhook | `netlify/functions/integration-ingest.ts` → `src/server/integration-ingest.ts` | `x-integration-id` header + per-integration webhook auth |
 | Ringba pixel | `GET /api/integrations/ringba/pixel` | Query-string `api_key` (public ingest key) |
 | Ringba API sync | `netlify/functions/ringba-api-sync-scheduled.ts` (every 5 min) → `src/server/ringba-api-sync.ts` | Server-side, stored access token |
 
-All ingest paths funnel into the shared ingestion logic in `src/server/integration-ingest.ts`, which normalizes calls, stores the source payload, records an `integration_events` row, and updates `integrations.status`.
+The webhook, pixel, and API-sync paths funnel into the shared ingestion logic in `src/server/integration-ingest.ts`, which normalizes calls, stores the source payload, records an `integration_events` row, and updates `integrations.status`. **CSV import is the exception:** it has its own normalization/insert logic in `src/server/import-dispatch.ts` and does not pass through `integration-ingest.ts`.
+
+> There is also a standalone `netlify/functions/import-dispatch.ts` (shared-secret authed, accepts a body `organizationId`). It is not invoked by the app — the API route above dispatches directly — and is slated for removal/hardening (see [`status-2026-05-29.md`](status-2026-05-29.md)).
 
 ## Webhook auth (`integration-ingest.ts`)
 
