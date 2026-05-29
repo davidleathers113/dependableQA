@@ -259,6 +259,10 @@ function createWorkflowClient(csvText: string) {
 
         if (table === "call_analyses") {
           return {
+            upsert: vi.fn(async (values: Record<string, unknown>) => {
+              callAnalyses.push(values);
+              return { error: null };
+            }),
             insert: vi.fn(async (values: Record<string, unknown>) => {
               callAnalyses.push(values);
               return { error: null };

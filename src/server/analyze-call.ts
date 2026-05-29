@@ -370,22 +370,29 @@ export async function analyzeCall(
     }
   }
 
-  const analysisInsert = await client.from("call_analyses").insert({
-    organization_id: options.organizationId,
-    call_id: options.callId,
-    analysis_version: `${config.analysisPromptVersion}:${config.analysisSchemaVersion}`,
-    model_name: modelName,
-    summary: parsed.summary,
-    disposition_suggested: parsed.suggestedDisposition,
-    confidence: parsed.confidence,
-    flag_summary: buildFlagSummary(parsed),
-    structured_output: parsed as Json,
-    processing_ms: Date.now() - startedAt,
-    prompt_version: config.analysisPromptVersion,
-    schema_version: config.analysisSchemaVersion,
-    usage_json: (response.usage ?? null) as Json | null,
-    raw_response_json: response as unknown as Json,
-  });
+  // Upsert on the (organization_id, call_id, analysis_version) unique constraint
+  // (migration 0010) so a reprocessed or duplicate analysis job — e.g. one re-run
+  // after its lease expired — updates the existing analysis instead of inserting a
+  // duplicate "current" row.
+  const analysisInsert = await client.from("call_analyses").upsert(
+    {
+      organization_id: options.organizationId,
+      call_id: options.callId,
+      analysis_version: `${config.analysisPromptVersion}:${config.analysisSchemaVersion}`,
+      model_name: modelName,
+      summary: parsed.summary,
+      disposition_suggested: parsed.suggestedDisposition,
+      confidence: parsed.confidence,
+      flag_summary: buildFlagSummary(parsed),
+      structured_output: parsed as Json,
+      processing_ms: Date.now() - startedAt,
+      prompt_version: config.analysisPromptVersion,
+      schema_version: config.analysisSchemaVersion,
+      usage_json: (response.usage ?? null) as Json | null,
+      raw_response_json: response as unknown as Json,
+    },
+    { onConflict: "organization_id,call_id,analysis_version" }
+  );
 
   if (analysisInsert.error) {
     throw new Error(analysisInsert.error.message);

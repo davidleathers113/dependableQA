@@ -7,6 +7,14 @@ import { transcribeCall } from "./transcribe-call";
 
 type SupabaseAny = SupabaseClient<Database>;
 
+// A claimed job holds its lease for this long before `recoverExpiredAiJobs` may
+// reclaim it. It must comfortably exceed the worst-case transcription+analysis
+// runtime, otherwise a still-running job is reclaimed and reprocessed. The
+// (organization_id, call_id, analysis_version) unique constraint on call_analyses
+// (migration 0010) is the backstop that keeps such a reprocess from creating a
+// duplicate analysis even if a lease is mis-sized.
+const DEFAULT_LEASE_MS = 5 * 60_000;
+
 export type AiJobType = "transcription" | "analysis";
 export type AiJobRow = Database["public"]["Tables"]["ai_jobs"]["Row"];
 export interface AiDispatchJobResult {
@@ -342,7 +350,7 @@ export async function claimAiJobs(
   }
 
   const claimed: AiJobRow[] = [];
-  const leaseExpiry = new Date(now.getTime() + (options.leaseMs ?? 60_000)).toISOString();
+  const leaseExpiry = new Date(now.getTime() + (options.leaseMs ?? DEFAULT_LEASE_MS)).toISOString();
 
   for (const candidate of candidates.data ?? []) {
     if (claimed.length >= (options.limit ?? 5)) {
@@ -475,6 +483,11 @@ export async function recoverExpiredAiJobs(
 async function markAiJobRunning(client: SupabaseAny, job: AiJobRow) {
   await updateCallForRunningJob(client, job.organization_id, job.call_id, job.job_type as AiJobType);
 
+  // attempt_count is incremented from the in-memory value rather than via a SQL
+  // expression, which is safe here: this update is gated on `status = 'claimed'`,
+  // and claimAiJobs already won that row via a compare-and-swap, so exactly one
+  // worker owns the job when this runs. (A SQL-atomic increment would require an
+  // RPC; the CAS ownership makes it unnecessary.)
   const running = await client
     .from("ai_jobs")
     .update({

@@ -16,11 +16,13 @@ import { analyzeCall } from "./analyze-call";
 function createClient() {
   const insertedFlags: Array<Record<string, unknown>> = [];
   const insertedAnalyses: Array<Record<string, unknown>> = [];
+  const analysisUpsertOptions: Array<Record<string, unknown> | undefined> = [];
   const callUpdates: Array<Record<string, unknown>> = [];
 
   return {
     insertedFlags,
     insertedAnalyses,
+    analysisUpsertOptions,
     callUpdates,
     client: {
       from(table: string) {
@@ -107,8 +109,9 @@ function createClient() {
 
         if (table === "call_analyses") {
           return {
-            insert: vi.fn(async (row: Record<string, unknown>) => {
+            upsert: vi.fn(async (row: Record<string, unknown>, options?: Record<string, unknown>) => {
               insertedAnalyses.push(row);
+              analysisUpsertOptions.push(options);
               return { error: null };
             }),
           };
@@ -196,7 +199,7 @@ describe("analyzeCall", () => {
       },
     });
 
-    const { client, insertedFlags, insertedAnalyses, callUpdates } = createClient();
+    const { client, insertedFlags, insertedAnalyses, analysisUpsertOptions, callUpdates } = createClient();
     const result = await analyzeCall(client as never, {
       organizationId: "org_1",
       callId: "call_1",
@@ -229,6 +232,9 @@ describe("analyzeCall", () => {
       schema_version: "v1",
       disposition_suggested: "qualified",
     });
+    // Analysis is written via an idempotent upsert so a reprocessed job at the same
+    // version updates rather than duplicating the current analysis (migration 0010).
+    expect(analysisUpsertOptions[0]).toEqual({ onConflict: "organization_id,call_id,analysis_version" });
     expect(callUpdates[0]).toMatchObject({
       analysis_status: "completed",
       analysis_error: null,
