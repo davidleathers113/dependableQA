@@ -1526,6 +1526,24 @@ export type Database = {
         }
         Returns: boolean
       }
+      create_organization_with_owner: {
+        Args: { p_name: string }
+        Returns: {
+          created_at: string
+          id: string
+          name: string
+          slug: string
+          status: string
+          timezone: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       has_org_role: {
         Args: {
           allowed_roles: Database["public"]["Enums"]["organization_role"][]
