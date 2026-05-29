@@ -30,6 +30,10 @@ Current migrations:
 | `0007_ai_pipeline.sql` | `ai_jobs` queue; transcription/analysis status columns on `calls` |
 | `0008_call_review_workspace.sql` | `call_review_notes`; time-bound columns on `call_flags` |
 | `0009_stripe_event_idempotency.sql` | `processed_stripe_events` (Stripe dedup); `wallet_ledger_entries.stripe_event_id`; `apply_stripe_recharge_event` RPC |
+| `0010_ai_analysis_idempotency.sql` | Unique `(organization_id, call_id, analysis_version)` on `call_analyses` (idempotent re-analysis) |
+| `0011_organization_onboarding.sql` | Drops the permissive `organizations` insert policy; adds `create_organization_with_owner(name)` transactional onboarding RPC |
+| `0012_fk_covering_indexes.sql` | Covering indexes for 24 previously-unindexed foreign keys |
+| `0013_function_security_hardening.sql` | Pins `search_path` on `set_updated_at` / `sync_call_flag_summary` / `apply_stripe_recharge_event`; tightens EXECUTE grants on `handle_new_user` / `is_org_member` / `has_org_role` |
 
 ## The three layers
 
@@ -51,7 +55,15 @@ The tables map onto the [three data layers](architecture.md#three-data-layers):
 
 Every tenant-owned row carries `organization_id`. RLS is strict and boring: read access requires the authenticated user to be a member of the row's organization (`is_org_member`); elevated writes additionally check role (`has_org_role`). Helper SQL functions `is_org_member(org_id)` and `has_org_role(org_id, allowed_roles[])` back the policies.
 
-RLS is the backstop. Many server paths use the **service-role admin client, which bypasses RLS** — those paths must filter `organization_id` in application code. See [ADR 0002](decisions/0002-three-supabase-clients-and-tenant-isolation.md).
+RLS is the backstop. Many server paths use the **service-role admin client, which bypasses RLS** — those paths must filter `organization_id` in application code. See [ADR 0002](decisions/0002-three-supabase-clients-and-tenant-isolation.md). These invariants are proven at the database layer (not just app-side) by `tests/db/rls-tenant-isolation.test.ts` — see [testing](testing.md#db-level-tests-npm-run-testdb).
+
+### Service-role-only (deny-all) tables
+
+`ai_jobs` and `processed_stripe_events` have **RLS enabled with no policies**. This is intentional and is a load-bearing invariant: with no policy, `anon` and `authenticated` are denied all access, and the tables are reachable **only** through the service-role admin client (the AI worker and the Stripe webhook), which bypasses RLS. The Supabase advisor will always flag these as `rls_enabled_no_policy` — that flag is expected here, not a gap. The deny-all behaviour is asserted in `tests/db/rls-tenant-isolation.test.ts` (a seeded row exists yet is invisible to `authenticated`/`anon`, and writes are rejected). Any future need to expose these tables to end users must go through the service layer, not a new RLS policy.
+
+### Organization onboarding
+
+There is **no client-facing arbitrary insert** on `organizations` (the old `WITH CHECK (true)` policy was dropped in `0011`). Org creation happens either server-side via the service-role admin client (`createOrganizationForUser`) or through the `create_organization_with_owner(name)` RPC — a `SECURITY DEFINER`, `search_path`-pinned function that creates the org and the caller's (`auth.uid()`) owner membership atomically and is EXECUTE-granted to `authenticated` only. Covered by `tests/db/organization-onboarding.test.ts`.
 
 ## Deduplication
 
@@ -65,9 +77,9 @@ The wallet balance is **derived** — it is the `balance_after_cents` of the mos
 
 ## Triggers
 
-- `set_updated_at` — maintains `updated_at` across most tables.
-- `handle_new_user` — provisions a `profiles` row on `auth.users` insert.
-- `sync_call_flag_summary` — keeps the `calls` flag rollup (count / top flag) in sync with `call_flags`.
+- `set_updated_at` — maintains `updated_at` across most tables. (`search_path` pinned in `0013`.)
+- `handle_new_user` — provisions a `profiles` row on `auth.users` insert. `SECURITY DEFINER`; EXECUTE revoked from all roles in `0013` (triggers fire regardless of grants) so it cannot be called as an RPC.
+- `sync_call_flag_summary` — keeps the `calls` flag rollup (count / top flag) in sync with `call_flags`. (`search_path` pinned in `0013`.)
 
 ## Storage
 
@@ -75,4 +87,4 @@ Three **private** buckets (`0005_storage.sql`): `imports` (uploaded CSVs), `reco
 
 ## Known advisor flags
 
-From the readiness snapshot ([`docs/status-2026-04-13.md`](status-2026-04-13.md)): `ai_jobs` has RLS enabled with no policies (accessed only via the service-role worker), `organizations` has a permissive insert policy, several foreign keys lack covering indexes, and Supabase Auth leaked-password protection is disabled. Track these before unrestricted multi-tenant launch.
+Most of the earlier advisor flags were resolved in Phase 3 (2026-05-29; see [`docs/status-2026-05-29.md`](status-2026-05-29.md)): the `organizations` permissive insert policy was dropped (`0011`), 24 unindexed foreign keys got covering indexes (`0012`), and three functions had `search_path` pinned plus EXECUTE grants tightened (`0013`). **Remaining/accepted flags:** `ai_jobs` and `processed_stripe_events` RLS-without-policies (the intentional service-role-only deny-all documented above), `extension_in_public` for `citext` (columns depend on it; moving is disruptive), `authenticated`-executable `SECURITY DEFINER` on `is_org_member`/`has_org_role` (RLS evaluation requires it) and `create_organization_with_owner` (the onboarding RPC), Supabase Auth leaked-password protection (a dashboard toggle), and the scale-only `auth_rls_initplan` / `multiple_permissive_policies` performance items. Track the latter before high-volume launch.
