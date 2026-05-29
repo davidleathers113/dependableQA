@@ -1,7 +1,7 @@
 ---
 title: Testing
 owner: Engineering
-last-reviewed: 2026-05-27
+last-reviewed: 2026-05-29
 ---
 
 # Testing
@@ -31,3 +31,24 @@ Two conventions coexist; follow the matching one when adding coverage:
 Existing coverage targets the risk areas: auth/session resolution, Supabase config fallback, import dispatch, provider ingest + webhook auth, the AI job queue, call-review actions, Stripe webhook handling, and the Zod request schemas in `src/lib/call-review-api-schemas.ts`. New server modules and API routes should ship with tests in the same style.
 
 > Manual browser QA has been done ad hoc in the past (against local `netlify dev`). There is no automated browser/e2e suite; treat manual passes as point-in-time checks, not regression coverage.
+
+## DB-level tests (`npm run test:db`)
+
+The default Vitest run mocks the Supabase client, so it proves *app-side* `.eq("organization_id", …)` discipline but **not** the database's own Row-Level Security or the SQL-level concurrency of the Stripe recharge RPC. A separate suite under `tests/db/**` exercises real Postgres:
+
+- `tests/db/rls-tenant-isolation.test.ts` — seeds two orgs with members across every role (owner/admin/reviewer/analyst/billing) plus calls, flags, review notes, billing, integrations, an `ai_jobs` row, and a `processed_stripe_events` row, then asserts RLS behaviour as `anon` / `authenticated` (per `auth.uid()`) / `service_role`: cross-org reads and writes are denied, role-scoped writes are enforced, `ai_jobs` and `processed_stripe_events` are invisible to `anon`/`authenticated` (service-role-only deny-all), and `service_role` bypasses RLS (which is *why* admin-client paths must filter `organization_id`).
+- `tests/db/stripe-recharge.test.ts` — drives `apply_stripe_recharge_event` against real Postgres: duplicate event id → applied once then no-op (one ledger row), concurrent same id → exactly one credit, concurrent distinct ids → serialized with no lost update, billing-account/organization mismatch → clean failure with no partial state, and EXECUTE granted only to `service_role`.
+
+These are **excluded from `npm test` and the release gate** (`vitest.config.ts` excludes `tests/db/**`) because CI has no Postgres. Run them on demand:
+
+```bash
+supabase start            # one-time per session; boots local Postgres on :54322
+npm run test:db           # vitest run --config vitest.db.config.ts
+```
+
+Prerequisites and safety:
+
+- **Docker + Supabase CLI** (`supabase start`). The stack applies all migrations in `supabase/migrations`, so the local schema matches production.
+- The harness (`tests/db/db-harness.ts`) connects to `TEST_DATABASE_URL` → `SUPABASE_DB_URL` → the local default `postgresql://postgres:postgres@127.0.0.1:54322/postgres`, and **refuses any non-local host** (it truncates tables). When no local database is reachable it **skips** rather than fails, so a developer without Docker is never blocked.
+- Each test runs in a rolled-back transaction acting as the target role via `set local role` + `request.jwt.claims`; fixtures are seeded once per file and truncated afterwards.
+- Known local-image quirk: invoking `apply_stripe_recharge_event` as a role lacking EXECUTE segfaults the Supabase Postgres 17 image on the permission-denied path. The grant tests therefore assert the EXECUTE privilege directly (`has_function_privilege`) — the exact thing the migration controls — instead of invoking it as `anon`/`authenticated`. This path is never reached in production, where only the service-role client calls the function.
