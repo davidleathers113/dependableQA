@@ -14,6 +14,81 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_jobs: {
+        Row: {
+          attempt_count: number
+          call_id: string
+          completed_at: string | null
+          created_at: string
+          dedupe_key: string
+          id: string
+          job_type: string
+          last_error: string | null
+          lease_expires_at: string | null
+          max_attempts: number
+          organization_id: string
+          payload_json: Json
+          priority: number
+          scheduled_at: string
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          call_id: string
+          completed_at?: string | null
+          created_at?: string
+          dedupe_key: string
+          id?: string
+          job_type: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          max_attempts?: number
+          organization_id: string
+          payload_json?: Json
+          priority?: number
+          scheduled_at?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          call_id?: string
+          completed_at?: string | null
+          created_at?: string
+          dedupe_key?: string
+          id?: string
+          job_type?: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          max_attempts?: number
+          organization_id?: string
+          payload_json?: Json
+          priority?: number
+          scheduled_at?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_jobs_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_jobs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       alert_rules: {
         Row: {
           cooldown_minutes: number
@@ -251,81 +326,6 @@ export type Database = {
             foreignKeyName: "billing_accounts_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: true
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ai_jobs: {
-        Row: {
-          attempt_count: number
-          call_id: string
-          completed_at: string | null
-          created_at: string
-          dedupe_key: string
-          id: string
-          job_type: string
-          last_error: string | null
-          lease_expires_at: string | null
-          max_attempts: number
-          organization_id: string
-          payload_json: Json
-          priority: number
-          scheduled_at: string
-          started_at: string | null
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          attempt_count?: number
-          call_id: string
-          completed_at?: string | null
-          created_at?: string
-          dedupe_key: string
-          id?: string
-          job_type: string
-          last_error?: string | null
-          lease_expires_at?: string | null
-          max_attempts?: number
-          organization_id: string
-          payload_json?: Json
-          priority?: number
-          scheduled_at?: string
-          started_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          attempt_count?: number
-          call_id?: string
-          completed_at?: string | null
-          created_at?: string
-          dedupe_key?: string
-          id?: string
-          job_type?: string
-          last_error?: string | null
-          lease_expires_at?: string | null
-          max_attempts?: number
-          organization_id?: string
-          payload_json?: Json
-          priority?: number
-          scheduled_at?: string
-          started_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ai_jobs_call_id_fkey"
-            columns: ["call_id"]
-            isOneToOne: false
-            referencedRelation: "calls"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ai_jobs_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -653,9 +653,9 @@ export type Database = {
           raw_response_json: Json | null
           response_format: string | null
           search_document: unknown
-          transcription_version: string | null
           transcript_segments: Json
           transcript_text: string
+          transcription_version: string | null
           updated_at: string
           usage_json: Json | null
         }
@@ -672,9 +672,9 @@ export type Database = {
           raw_response_json?: Json | null
           response_format?: string | null
           search_document?: unknown
-          transcription_version?: string | null
           transcript_segments?: Json
           transcript_text: string
+          transcription_version?: string | null
           updated_at?: string
           usage_json?: Json | null
         }
@@ -691,9 +691,9 @@ export type Database = {
           raw_response_json?: Json | null
           response_format?: string | null
           search_document?: unknown
-          transcription_version?: string | null
           transcript_segments?: Json
           transcript_text?: string
+          transcription_version?: string | null
           updated_at?: string
           usage_json?: Json | null
         }
@@ -1312,6 +1312,24 @@ export type Database = {
         }
         Relationships: []
       }
+      processed_stripe_events: {
+        Row: {
+          event_type: string
+          processed_at: string
+          stripe_event_id: string
+        }
+        Insert: {
+          event_type: string
+          processed_at?: string
+          stripe_event_id: string
+        }
+        Update: {
+          event_type?: string
+          processed_at?: string
+          stripe_event_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -1446,6 +1464,7 @@ export type Database = {
           organization_id: string
           reference_id: string | null
           reference_type: string | null
+          stripe_event_id: string | null
         }
         Insert: {
           amount_cents: number
@@ -1458,6 +1477,7 @@ export type Database = {
           organization_id: string
           reference_id?: string | null
           reference_type?: string | null
+          stripe_event_id?: string | null
         }
         Update: {
           amount_cents?: number
@@ -1470,6 +1490,7 @@ export type Database = {
           organization_id?: string
           reference_id?: string | null
           reference_type?: string | null
+          stripe_event_id?: string | null
         }
         Relationships: [
           {
@@ -1493,6 +1514,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_stripe_recharge_event: {
+        Args: {
+          p_amount_cents: number
+          p_billing_account_id: string
+          p_checkout_session_id: string
+          p_customer_id: string
+          p_event_type: string
+          p_organization_id: string
+          p_stripe_event_id: string
+        }
+        Returns: boolean
+      }
       has_org_role: {
         Args: {
           allowed_roles: Database["public"]["Enums"]["organization_role"][]

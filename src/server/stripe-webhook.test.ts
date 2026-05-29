@@ -53,6 +53,7 @@ describe("stripe webhook", () => {
     insertAuditLog.mockReset();
 
     getAdminSupabase.mockReturnValue({
+      rpc: vi.fn(async () => ({ data: true, error: null })),
       from: vi.fn(() => ({
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
@@ -207,5 +208,108 @@ describe("stripe webhook", () => {
       stripeEventId: "evt_pi_succeeded",
     });
     expect(response.statusCode).toBe(200);
+  });
+
+  function checkoutSessionEvent() {
+    return {
+      id: "evt_checkout_completed",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_test_123",
+          amount_total: 5000,
+          customer: "cus_chk",
+          metadata: {
+            app: "dependableQA",
+            source: "dependableQA",
+            environment: "test",
+            organizationId: "org_chk",
+            billingAccountId: "bill_chk",
+            flow: "checkout_funding",
+          },
+        },
+      },
+    };
+  }
+
+  it("applies a wallet credit once via the idempotent RPC and audits the first delivery", async () => {
+    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const admin = { rpc, from: vi.fn(() => ({})) };
+    getAdminSupabase.mockReturnValue(admin);
+    constructEventMock.mockReturnValue(checkoutSessionEvent());
+
+    const response = await handler({
+      httpMethod: "POST",
+      body: "{}",
+      headers: { "stripe-signature": "sig_test" },
+    });
+
+    expect(rpc).toHaveBeenCalledWith("apply_stripe_recharge_event", {
+      p_stripe_event_id: "evt_checkout_completed",
+      p_event_type: "checkout.session.completed",
+      p_organization_id: "org_chk",
+      p_billing_account_id: "bill_chk",
+      p_amount_cents: 5000,
+      p_customer_id: "cus_chk",
+      p_checkout_session_id: "cs_test_123",
+    });
+    expect(insertAuditLog).toHaveBeenCalledWith(
+      admin,
+      expect.objectContaining({ action: "billing.recharge.completed", entityId: "bill_chk" })
+    );
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("does not re-credit or re-audit a duplicate checkout.session.completed delivery", async () => {
+    // RPC returns false => the event was already processed (duplicate delivery).
+    const rpc = vi.fn(async () => ({ data: false, error: null }));
+    const admin = { rpc, from: vi.fn(() => ({})) };
+    getAdminSupabase.mockReturnValue(admin);
+    constructEventMock.mockReturnValue(checkoutSessionEvent());
+
+    const response = await handler({
+      httpMethod: "POST",
+      body: "{}",
+      headers: { "stripe-signature": "sig_test" },
+    });
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(insertAuditLog).not.toHaveBeenCalled();
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("returns 500 and writes no audit when the recharge RPC errors", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: { message: "deadlock detected" } }));
+    const admin = { rpc, from: vi.fn(() => ({})) };
+    getAdminSupabase.mockReturnValue(admin);
+    constructEventMock.mockReturnValue(checkoutSessionEvent());
+
+    const response = await handler({
+      httpMethod: "POST",
+      body: "{}",
+      headers: { "stripe-signature": "sig_test" },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(insertAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid Stripe signature with 400 and applies nothing", async () => {
+    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const admin = { rpc, from: vi.fn(() => ({})) };
+    getAdminSupabase.mockReturnValue(admin);
+    constructEventMock.mockImplementation(() => {
+      throw new Error("No signatures found matching the expected signature for payload.");
+    });
+
+    const response = await handler({
+      httpMethod: "POST",
+      body: "{}",
+      headers: { "stripe-signature": "bad_sig" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(insertAuditLog).not.toHaveBeenCalled();
   });
 });

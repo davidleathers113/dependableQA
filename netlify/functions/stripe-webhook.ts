@@ -132,47 +132,40 @@ export async function handler(event: {
     const billingAccountId = attribution.billingAccountId;
 
     if (organizationId && billingAccountId && amountCents > 0) {
-      const balanceResult = await admin
-        .from("wallet_ledger_entries")
-        .select("balance_after_cents")
-        .eq("organization_id", organizationId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const currentBalance = Number((balanceResult.data as Record<string, unknown> | null)?.balance_after_cents ?? 0);
-      const balanceAfter = currentBalance + amountCents;
-
-      await admin.from("wallet_ledger_entries").insert({
-        organization_id: organizationId,
-        billing_account_id: billingAccountId,
-        entry_type: "recharge",
-        amount_cents: amountCents,
-        balance_after_cents: balanceAfter,
-        reference_type: "stripe_checkout_session",
-        description: `Stripe checkout session ${session.id}`,
+      // Apply the wallet credit through a single transactional, idempotent RPC.
+      // The processed_stripe_events PK makes duplicate deliveries a no-op, and a
+      // `for update` lock on the billing account serializes concurrent recharges,
+      // so the read-compute-insert of the running balance cannot race.
+      const rechargeResult = await admin.rpc("apply_stripe_recharge_event", {
+        p_stripe_event_id: stripeEvent.id,
+        p_event_type: stripeEvent.type,
+        p_organization_id: organizationId,
+        p_billing_account_id: billingAccountId,
+        p_amount_cents: amountCents,
+        p_customer_id: customerId || "",
+        p_checkout_session_id: session.id,
       });
 
-      await admin
-        .from("billing_accounts")
-        .update({
-          last_successful_charge_at: new Date().toISOString(),
-          stripe_customer_id: customerId || null,
-        })
-        .eq("id", billingAccountId);
+      if (rechargeResult.error) {
+        // Surface a 5xx so Stripe retries; the idempotency guard makes retries safe.
+        return json(500, { error: rechargeResult.error.message });
+      }
 
-      await insertAuditLog(admin, {
-        organizationId,
-        actorUserId: null,
-        entityType: "billing_account",
-        entityId: billingAccountId,
-        action: "billing.recharge.completed",
-        metadata: {
-          summary: `Applied ${amountCents} cents from Stripe checkout.`,
-          stripeEventId: stripeEvent.id,
-          stripeFlow: attribution.flow || metadataValue(session.metadata, "flow"),
-        },
-      });
+      // `true` => newly applied; `false` => duplicate delivery already credited.
+      if (rechargeResult.data === true) {
+        await insertAuditLog(admin, {
+          organizationId,
+          actorUserId: null,
+          entityType: "billing_account",
+          entityId: billingAccountId,
+          action: "billing.recharge.completed",
+          metadata: {
+            summary: `Applied ${amountCents} cents from Stripe checkout.`,
+            stripeEventId: stripeEvent.id,
+            stripeFlow: attribution.flow || metadataValue(session.metadata, "flow"),
+          },
+        });
+      }
     }
 
     if (customerId) {
