@@ -29,11 +29,11 @@ function normalizeLoginError(message: string) {
   return "We couldn’t log you in right now. Please try again.";
 }
 
-const { session } = Astro.locals;
+const { user } = Astro.locals;
 const resetSuccess = Astro.url.searchParams.get("reset") === "success";
 
-if (session) {
-  const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, session.user.id);
+if (user) {
+  const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, user.id);
   if (organizationId) {
     setActiveOrganizationId(Astro.cookies, organizationId);
     return Astro.redirect("/app/overview");
@@ -54,29 +54,23 @@ if (Astro.request.method === "POST") {
   if (!email || !password) {
     errorMessage = "Email and password are required.";
   } else {
-    const { error } = await Astro.locals.supabase.auth.signInWithPassword({
+    const { data, error } = await Astro.locals.supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
       errorMessage = normalizeLoginError(error.message);
+    } else if (!data.user) {
+      errorMessage = "Signed in, but no user was returned. Try again.";
     } else {
-      const {
-        data: { session: nextSession },
-      } = await Astro.locals.supabase.auth.getSession();
-
-      if (!nextSession) {
-        errorMessage = "Signed in, but no session was returned. Try again.";
-      } else {
-        const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, nextSession.user.id);
-        if (organizationId) {
-          setActiveOrganizationId(Astro.cookies, organizationId);
-          return Astro.redirect("/app/overview");
-        }
-
-        return Astro.redirect("/onboarding");
+      const organizationId = await getDefaultOrganizationId(Astro.locals.supabase, data.user.id);
+      if (organizationId) {
+        setActiveOrganizationId(Astro.cookies, organizationId);
+        return Astro.redirect("/app/overview");
       }
+
+      return Astro.redirect("/onboarding");
     }
   }
 }

@@ -1,43 +1,50 @@
-import type { APIContext, AstroCookies } from "astro";
+import type { APIContext } from "astro";
 import { getDefaultOrganizationId, listUserOrganizations } from "../app-data";
 import { getActiveOrganizationId, setActiveOrganizationId } from "./active-organization";
-import { createServerSupabaseClient } from "../supabase/server-client";
 
 export interface RequestAppSession {
   user: { id: string; email: string };
   organization: { id: string; name: string; role: string };
 }
 
+/**
+ * Resolves the authenticated session + active organization for an API route.
+ * The user identity comes from `context.locals.user`, which the middleware
+ * resolved with `supabase.auth.getUser()` (server-verified). Returns null when
+ * the request is unauthenticated or has no membership in the active org, so a
+ * revoked/deleted user (getUser → null) cannot reach protected data.
+ */
 export async function resolveRequestAppSession(
-  request: Request,
-  cookies: AstroCookies
+  context: APIContext
 ): Promise<RequestAppSession | null> {
-  const supabase = createServerSupabaseClient(request, cookies);
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const user = context.locals.user;
+  const supabase = context.locals.supabase;
 
-  if (!session?.user.email) {
+  if (!user?.email) {
     return null;
   }
 
-  const organizationId = await getDefaultOrganizationId(supabase, session.user.id, getActiveOrganizationId(cookies));
+  const organizationId = await getDefaultOrganizationId(
+    supabase,
+    user.id,
+    getActiveOrganizationId(context.cookies)
+  );
   if (!organizationId) {
     return null;
   }
 
-  const memberships = await listUserOrganizations(supabase, session.user.id);
+  const memberships = await listUserOrganizations(supabase, user.id);
   const membership = memberships.find((item) => item.id === organizationId);
   if (!membership) {
     return null;
   }
 
-  setActiveOrganizationId(cookies, organizationId);
+  setActiveOrganizationId(context.cookies, organizationId);
 
   return {
     user: {
-      id: session.user.id,
-      email: session.user.email,
+      id: user.id,
+      email: user.email,
     },
     organization: {
       id: membership.id,
@@ -48,10 +55,5 @@ export async function resolveRequestAppSession(
 }
 
 export async function requireApiSession(context: APIContext) {
-  const session = await resolveRequestAppSession(context.request, context.cookies);
-  if (!session) {
-    return null;
-  }
-
-  return session;
+  return resolveRequestAppSession(context);
 }

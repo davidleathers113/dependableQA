@@ -5,9 +5,9 @@ import Footer from "../components/marketing/Footer.astro";
 import Navbar from "../components/marketing/Navbar.astro";
 import MarketingLayout from "../layouts/MarketingLayout.astro";
 
-const { session } = Astro.locals;
+const { user } = Astro.locals;
 
-if (session) {
+if (user) {
   return Astro.redirect("/app/overview");
 }
 ---

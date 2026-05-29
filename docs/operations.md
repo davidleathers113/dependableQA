@@ -58,10 +58,10 @@ Set runtime config in the Netlify UI per context (Production / Deploy Preview). 
 2. Confirm the integration's `status` and stored credentials.
 
 **Billing discrepancy**
-1. Reconcile `wallet_ledger_entries` against Stripe events. Note the known idempotency gap (below) — duplicate Stripe deliveries can double-credit.
+1. Reconcile `wallet_ledger_entries` against Stripe events using `stripe_event_id`. Crediting is idempotent (the `apply_stripe_recharge_event` RPC dedups on `processed_stripe_events`), so duplicate deliveries apply at most once.
 
 ## Known operational risks
 
-Tracked in [`docs/status-2026-05-29.md`](status-2026-05-29.md) (supersedes the [April snapshot](status-2026-04-13.md)): Stripe webhook credit idempotency, non-atomic import-batch claiming (concurrent dispatch can race), service-role-heavy API routes relying on app-side tenant filtering, and `getSession()` rather than a verified-user server pattern on protected paths. Documented, not yet fixed.
+Tracked in [`docs/status-2026-05-29.md`](status-2026-05-29.md) (supersedes the [April snapshot](status-2026-04-13.md)). The Phase 1–4 blockers are now resolved: Stripe webhook credit idempotency (transactional RPC), atomic import-batch claiming + CSV dedupe, DB-level RLS proof for the service-role-heavy paths, and protected server auth now using verified `getUser()` instead of `getSession()`. Remaining: Ringba pixel / scheduled-function auth (Phase 5) and browser e2e (Phase 6).
 
 **Migration drift** is a process risk, not a code risk: there is no automated migration apply (see the warning under [The release gate](#the-release-gate)). Follow the [release checklist](releasing.md) so committed migrations are actually applied to the target database.

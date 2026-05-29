@@ -5,13 +5,13 @@ import { setActiveOrganizationId } from "../lib/auth/active-organization";
 import { getAdminSupabase } from "../lib/supabase/admin-client";
 import AuthLayout from "../layouts/AuthLayout.astro";
 
-const { session } = Astro.locals;
+const { user } = Astro.locals;
 
-if (!session) {
+if (!user) {
   return Astro.redirect("/login");
 }
 
-const existingOrganizations = await listUserOrganizations(Astro.locals.supabase, session.user.id);
+const existingOrganizations = await listUserOrganizations(Astro.locals.supabase, user.id);
 if (existingOrganizations.length > 0) {
   setActiveOrganizationId(Astro.cookies, existingOrganizations[0].id);
   return Astro.redirect("/app/overview");
@@ -28,8 +28,8 @@ if (Astro.request.method === "POST") {
   } else {
     try {
       const organization = await createOrganizationForUser(getAdminSupabase(), {
-        userId: session.user.id,
-        email: session.user.email ?? "",
+        userId: user.id,
+        email: user.email ?? "",
         organizationName,
       });
 

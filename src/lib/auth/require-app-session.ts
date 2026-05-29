@@ -1,7 +1,6 @@
 import type { AstroGlobal } from "astro";
 import { getDefaultOrganizationId, listUserOrganizations } from "../app-data";
 import { getActiveOrganizationId, setActiveOrganizationId } from "./active-organization";
-import { createServerSupabaseClient } from "../supabase/server-client";
 
 export interface AppSession {
   user: { id: string; email: string };
@@ -9,24 +8,25 @@ export interface AppSession {
 }
 
 /**
- * Resolves the current session and the user's active organization.
- * Redirects to /login if unauthenticated.
- * Redirects to onboarding if no organization membership is found.
+ * Resolves the current session and the user's active organization for an app
+ * page. The user identity comes from `Astro.locals.user`, which the middleware
+ * resolved with `supabase.auth.getUser()` (server-verified against the Auth
+ * server) — this never trusts an unverified cookie session.
+ *
+ * Redirects to /login if unauthenticated, or /onboarding if there's no
+ * organization membership for the active organization.
  */
 export async function requireAppSession(Astro: AstroGlobal): Promise<AppSession> {
-  const supabase = createServerSupabaseClient(Astro.request, Astro.cookies);
+  const user = Astro.locals.user;
+  const supabase = Astro.locals.supabase;
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
+  if (!user?.email) {
     throw Astro.redirect("/login");
   }
 
   const activeOrganizationId = await getDefaultOrganizationId(
     supabase,
-    session.user.id,
+    user.id,
     getActiveOrganizationId(Astro.cookies)
   );
 
@@ -36,7 +36,7 @@ export async function requireAppSession(Astro: AstroGlobal): Promise<AppSession>
 
   setActiveOrganizationId(Astro.cookies, activeOrganizationId);
 
-  const organizations = await listUserOrganizations(supabase, session.user.id);
+  const organizations = await listUserOrganizations(supabase, user.id);
   const membership = organizations.find((organization) => organization.id === activeOrganizationId);
 
   if (!membership) {
@@ -45,8 +45,8 @@ export async function requireAppSession(Astro: AstroGlobal): Promise<AppSession>
 
   return {
     user: {
-      id: session.user.id,
-      email: session.user.email!,
+      id: user.id,
+      email: user.email,
     },
     organization: {
       id: membership.id,

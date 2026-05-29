@@ -7,16 +7,19 @@ export async function handleAppRequest(
 ) {
   const supabase = createServerSupabaseClient(context.request, context.cookies);
 
+  // getUser() validates the JWT against the Supabase Auth server on every
+  // request — so revoked, deleted, or expired users are rejected. getSession()
+  // only decodes the cookie and must NOT be used as a server trust anchor. This
+  // is the single verification point; downstream resolvers trust locals.user.
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
   context.locals.supabase = supabase;
-  context.locals.session = session;
-  context.locals.user = session?.user ?? null;
+  context.locals.user = user;
 
-  // Simple auth guard for /app routes
-  if (context.url.pathname.startsWith("/app") && !session) {
+  // Auth guard for /app routes.
+  if (context.url.pathname.startsWith("/app") && !user) {
     return context.redirect("/login");
   }
 

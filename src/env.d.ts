@@ -23,7 +23,10 @@ interface ImportMeta {
 declare namespace App {
   interface Locals {
     supabase: import("@supabase/supabase-js").SupabaseClient<import("../supabase/types").Database>;
-    session: import("@supabase/supabase-js").Session | null;
+    // The server-verified user (resolved once per request by the middleware via
+    // supabase.auth.getUser(), which validates the JWT against the Auth server).
+    // This is the trust anchor for protected server auth — never derive auth
+    // decisions from an unverified getSession() cookie.
     user: import("@supabase/supabase-js").User | null;
   }
 }
