@@ -134,36 +134,60 @@ async function markImportBatchFailed(
   });
 }
 
-function canDispatchExistingBatch(status: string) {
-  const normalized = status.trim().toLowerCase();
-  return normalized === "uploaded" || normalized === "failed" || normalized === "partial";
-}
-
 export async function dispatchImportBatch(
   client: SupabaseAny,
   options: { organizationId: string; batchId: string; actorUserId: string | null }
 ) {
-  const batchResult = await client
+  // Atomically claim the batch. Only one dispatch can flip a dispatchable batch
+  // (uploaded/failed/partial) to processing: the status precondition on the UPDATE
+  // plus the row lock means a concurrent or double dispatch matches zero rows and
+  // bails here, instead of racing through the old read-then-write claim and both
+  // proceeding to parse the same file.
+  const claim = await client
     .from("import_batches")
-    .select("id, filename, storage_path, source_provider, status")
-    .eq("organization_id", options.organizationId)
+    .update({
+      status: "processing",
+      started_at: new Date().toISOString(),
+      completed_at: null,
+      row_count_total: 0,
+      row_count_accepted: 0,
+      row_count_rejected: 0,
+    })
     .eq("id", options.batchId)
-    .single();
+    .eq("organization_id", options.organizationId)
+    .in("status", ["uploaded", "failed", "partial"])
+    .select("id, filename, storage_path, source_provider")
+    .maybeSingle();
 
-  if (batchResult.error || !batchResult.data) {
-    throw new Error(batchResult.error?.message ?? "Batch not found.");
+  if (claim.error) {
+    throw new Error(claim.error.message);
   }
 
-  const batch = batchResult.data;
-  const currentStatus = asString(batch.status);
+  if (!claim.data) {
+    // The claim matched no row — surface why without re-attempting it.
+    const current = await client
+      .from("import_batches")
+      .select("status")
+      .eq("organization_id", options.organizationId)
+      .eq("id", options.batchId)
+      .maybeSingle();
 
-  if (currentStatus.trim().toLowerCase() === "processing") {
-    throw new Error("This batch is already processing. Wait for it to finish before retrying dispatch.");
-  }
+    if (current.error) {
+      throw new Error(current.error.message);
+    }
 
-  if (!canDispatchExistingBatch(currentStatus)) {
+    if (!current.data) {
+      throw new Error("Batch not found.");
+    }
+
+    if (asString((current.data as Record<string, unknown>).status).trim().toLowerCase() === "processing") {
+      throw new Error("This batch is already processing. Wait for it to finish before retrying dispatch.");
+    }
+
     throw new Error("Retry dispatch is only available for uploaded, failed, or partial batches.");
   }
+
+  const batch = claim.data;
 
   try {
     const clearErrorsResult = await client
@@ -174,23 +198,6 @@ export async function dispatchImportBatch(
 
     if (clearErrorsResult.error) {
       throw new Error(clearErrorsResult.error.message);
-    }
-
-    const startResult = await client
-      .from("import_batches")
-      .update({
-        status: "processing",
-        started_at: new Date().toISOString(),
-        completed_at: null,
-        row_count_total: 0,
-        row_count_accepted: 0,
-        row_count_rejected: 0,
-      })
-      .eq("id", options.batchId)
-      .eq("organization_id", options.organizationId);
-
-    if (startResult.error) {
-      throw new Error(startResult.error.message);
     }
 
     const storagePath = asString(batch.storage_path);
@@ -207,6 +214,7 @@ export async function dispatchImportBatch(
     const rows = parseCsv(csvText);
     let acceptedCount = 0;
     let rejectedCount = 0;
+    let skippedCount = 0;
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
       const row = rows[rowIndex];
@@ -271,11 +279,11 @@ export async function dispatchImportBatch(
 
         const callInsert = await client
           .from("calls")
-          .insert(callPayload)
+          .upsert(callPayload, { onConflict: "organization_id,dedupe_hash", ignoreDuplicates: true })
           .select("id")
-          .single();
+          .maybeSingle();
 
-        if (callInsert.error || !callInsert.data) {
+        if (callInsert.error) {
           rejectedCount += 1;
           await insertRowError(
             client,
@@ -283,9 +291,17 @@ export async function dispatchImportBatch(
             options.batchId,
             rowNumber,
             "CALL_INSERT_FAILED",
-            callInsert.error?.message ?? "Unable to create call record.",
+            callInsert.error.message ?? "Unable to create call record.",
             row
           );
+          continue;
+        }
+
+        if (!callInsert.data) {
+          // A call with this (organization_id, dedupe_hash) already exists — a
+          // re-dispatch or concurrent insert. Dedup: skip re-creating the snapshot /
+          // transcript and re-enqueuing AI jobs, and don't count it as an error.
+          skippedCount += 1;
           continue;
         }
 
@@ -358,14 +374,17 @@ export async function dispatchImportBatch(
       }
     }
 
-    const finalStatus = getImportBatchFinalStatus(acceptedCount, rejectedCount);
+    // Deduped (already-existing) rows count toward success, not failure, so a
+    // re-dispatch of a fully-imported batch resolves to completed rather than failed.
+    const successCount = acceptedCount + skippedCount;
+    const finalStatus = getImportBatchFinalStatus(successCount, rejectedCount);
 
     const updateResult = await client
       .from("import_batches")
       .update({
         status: finalStatus,
         row_count_total: rows.length,
-        row_count_accepted: acceptedCount,
+        row_count_accepted: successCount,
         row_count_rejected: rejectedCount,
         completed_at: new Date().toISOString(),
       })
@@ -384,18 +403,20 @@ export async function dispatchImportBatch(
       action: "import.dispatch.completed",
       after: {
         acceptedCount,
+        skippedCount,
         rejectedCount,
         rowCountTotal: rows.length,
         status: finalStatus,
       },
       metadata: {
-        summary: `Processed ${acceptedCount} rows and rejected ${rejectedCount}.`,
+        summary: `Processed ${acceptedCount} new rows, skipped ${skippedCount} duplicates, rejected ${rejectedCount}.`,
         filename: asString(batch.filename),
       },
     });
 
     return {
       acceptedCount,
+      skippedCount,
       rejectedCount,
       rowCountTotal: rows.length,
       status: finalStatus,

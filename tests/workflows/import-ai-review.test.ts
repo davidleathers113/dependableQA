@@ -128,35 +128,40 @@ function createWorkflowClient(csvText: string) {
     client: {
       from(table: string) {
         if (table === "import_batches") {
-          return {
-            select() {
-              return this;
-            },
+          let isUpdate = false;
+          const builder: Record<string, unknown> = {
             update(values: Record<string, unknown>) {
+              isUpdate = true;
               importBatchUpdates.push(values);
-              return {
-                error: null,
-                eq() {
-                  return this;
-                },
-              };
+              return builder;
+            },
+            select() {
+              return builder;
             },
             eq() {
-              return this;
+              return builder;
             },
-            async single() {
-              return {
-                data: {
-                  id: "batch_1",
-                  filename: "calls.csv",
-                  storage_path: "org_1/calls.csv",
-                  source_provider: "custom",
-                  status: "uploaded",
-                },
-                error: null,
-              };
+            in() {
+              return builder;
+            },
+            async maybeSingle() {
+              return isUpdate
+                ? {
+                    data: {
+                      id: "batch_1",
+                      filename: "calls.csv",
+                      storage_path: "org_1/calls.csv",
+                      source_provider: "custom",
+                    },
+                    error: null,
+                  }
+                : { data: { status: "uploaded" }, error: null };
+            },
+            then(resolve: (value: { error: null }) => void) {
+              resolve({ error: null });
             },
           };
+          return builder;
         }
 
         if (table === "import_row_errors") {
@@ -179,6 +184,21 @@ function createWorkflowClient(csvText: string) {
 
         if (table === "calls") {
           return {
+            upsert: vi.fn((values: Record<string, unknown>) => {
+              const row = {
+                id: `call_${calls.length + 1}`,
+                ...values,
+              };
+              calls.push(row);
+              return {
+                select: vi.fn(() => ({
+                  maybeSingle: vi.fn(async () => ({
+                    data: { id: row.id },
+                    error: null,
+                  })),
+                })),
+              };
+            }),
             insert: vi.fn((values: Record<string, unknown>) => {
               const row = {
                 id: `call_${calls.length + 1}`,
