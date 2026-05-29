@@ -21,6 +21,7 @@ DependableQA is a multi-tenant call-QA operations system: ingest calls, transcri
 - [AI Pipeline](ai-pipeline.md) — transcription/analysis job queue
 - [Integrations & Ingestion](integrations.md) — Ringba pixel/webhook/API sync
 - [Operations & Deployment](operations.md) — Netlify, the `ci:verify` gate, scheduled functions, runbook
+- [Releasing & Database Migrations](releasing.md) — manual release checklist; how migrations are applied (and the drift risk)
 - [Environment Variables](environment.md) — full env-var contract
 - [Testing](testing.md) — Vitest conventions
 - [Supabase Auth Email Templates](../supabase/templates/README.md) — branded auth emails

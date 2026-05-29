@@ -23,6 +23,8 @@ which is `check:env-example` → `check:migrations` → `test` → `build` (`ast
 - `npm run check:env-example` — fails if any required key (see `scripts/check-env-example.mjs`) is absent from `.env-example`. Add new required env vars there.
 - `npm run check:migrations` — fails unless `supabase/migrations` are numerically contiguous.
 
+> ⚠️ **Migration drift warning.** `check:migrations` only verifies the migration *files* are numerically contiguous — neither Netlify nor GitHub CI **applies** migrations to any database. Schema changes are applied **manually** (Supabase CLI/MCP), decoupled from the deploy. If you merge a migration but skip the manual apply, the app code ships against a schema the target database does not have. This actually happened: `0008_call_review_workspace` shipped in code on 2026-04-13 but was not applied to production until 2026-05-29, silently 500ing the call-detail page (it queries `call_review_notes` / `call_flags.start_seconds`). **Always follow the [release checklist](releasing.md) and apply pending migrations as part of every release.**
+
 ## Scheduled functions (`netlify.toml`)
 
 | Function | Schedule | Purpose |
@@ -61,4 +63,6 @@ Set runtime config in the Netlify UI per context (Production / Deploy Preview). 
 
 ## Known operational risks
 
-Tracked in [`docs/status-2026-04-13.md`](status-2026-04-13.md): Stripe webhook credit idempotency, non-atomic import-batch claiming (concurrent dispatch can race), service-role-heavy API routes relying on app-side tenant filtering, and `getSession()` rather than a verified-user server pattern on protected paths. Documented, not yet fixed.
+Tracked in [`docs/status-2026-05-29.md`](status-2026-05-29.md) (supersedes the [April snapshot](status-2026-04-13.md)): Stripe webhook credit idempotency, non-atomic import-batch claiming (concurrent dispatch can race), service-role-heavy API routes relying on app-side tenant filtering, and `getSession()` rather than a verified-user server pattern on protected paths. Documented, not yet fixed.
+
+**Migration drift** is a process risk, not a code risk: there is no automated migration apply (see the warning under [The release gate](#the-release-gate)). Follow the [release checklist](releasing.md) so committed migrations are actually applied to the target database.
