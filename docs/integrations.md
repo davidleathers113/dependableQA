@@ -19,7 +19,7 @@ Calls enter the system through four `source_kind`s: `csv`, `webhook`, `pixel`, a
 
 The webhook, pixel, and API-sync paths funnel into the shared ingestion logic in `src/server/integration-ingest.ts`, which normalizes calls, stores the source payload, records an `integration_events` row, and updates `integrations.status`. **CSV import is the exception:** it has its own normalization/insert logic in `src/server/import-dispatch.ts` and does not pass through `integration-ingest.ts`.
 
-> There is also a standalone `netlify/functions/import-dispatch.ts` (shared-secret authed, accepts a body `organizationId`). It is not invoked by the app — the API route above dispatches directly — and is slated for removal/hardening (see [`status-2026-05-29.md`](status-2026-05-29.md)).
+> A standalone `netlify/functions/import-dispatch.ts` (shared-secret authed, accepting a body-supplied `organizationId` under the service-role client) previously existed as an unused second entry point. It was **removed** on 2026-05-29 (Phase 1) because it violated the no-body-org tenant rule and had no caller — the API route above is the only dispatch path. The `IMPORT_DISPATCH_SHARED_SECRET` env var was retired with it.
 
 ## Webhook auth (`integration-ingest.ts`)
 

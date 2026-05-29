@@ -39,7 +39,6 @@ Each verifies a shared secret (timing-safe compare via `src/server/netlify-reque
 | Function | Auth |
 |---|---|
 | `ai-dispatch` | header `x-dependableqa-ai-dispatch` ← `AI_DISPATCH_SHARED_SECRET` |
-| `import-dispatch` | header `x-dependableqa-import-dispatch` ← `IMPORT_DISPATCH_SHARED_SECRET` (falls back to `AI_DISPATCH_SHARED_SECRET`) |
 | `integration-ingest` | header `x-integration-id` + per-integration webhook auth (see [integrations](integrations.md)) |
 | `stripe-webhook` | `stripe-signature` verified against `STRIPE_WEBHOOK_SECRET` |
 
