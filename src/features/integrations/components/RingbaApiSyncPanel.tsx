@@ -5,6 +5,7 @@ import { LocalTime } from "../../../components/ui/LocalTime";
 import {
   DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
   DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS,
+  listIanaTimeZones,
   RINGBA_API_LOOKBACK_DEFAULT_HOURS,
   RINGBA_API_POLL_INTERVAL_DEFAULT_MINUTES,
   RINGBA_API_POLL_INTERVAL_MAX_MINUTES,
@@ -55,6 +56,17 @@ export function RingbaApiSyncPanel({
   const [lookback, setLookback] = React.useState(rb.lookbackHours);
   const [minDuration, setMinDuration] = React.useState(rb.minimumDurationSeconds);
   const [validationMessage, setValidationMessage] = React.useState("");
+
+  // Runtime-supported IANA zones, plus the current value if it predates the
+  // runtime's zone table, so a previously-saved zone stays selectable.
+  const timeZoneOptions = React.useMemo(() => {
+    const zones = listIanaTimeZones();
+    const current = timeZone.trim();
+    if (current && !zones.includes(current)) {
+      return [current, ...zones];
+    }
+    return zones;
+  }, [timeZone]);
 
   React.useEffect(() => {
     setEnabled(integration.ringba.ringbaApiSyncEnabled);
@@ -194,13 +206,18 @@ export function RingbaApiSyncPanel({
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
             Call logs time zone (IANA)
           </span>
-          <input
-            value={timeZone}
+          <select
+            value={timeZone || DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE}
             onChange={(e) => setTimeZone(e.target.value)}
-            placeholder={DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE}
             disabled={disabled}
             className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
-          />
+          >
+            {timeZoneOptions.map((zone) => (
+              <option key={zone} value={zone}>
+                {zone}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="space-y-2">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">

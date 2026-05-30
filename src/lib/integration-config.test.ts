@@ -6,12 +6,25 @@ import {
   RINGBA_API_POLL_INTERVAL_DEFAULT_MINUTES,
   getPublicIntegrationRingbaConfig,
   getPublicIntegrationWebhookAuth,
+  isValidIanaTimeZone,
+  listIanaTimeZones,
   mergeRingbaApiLastSyncAt,
   normalizeIntegrationRingbaConfigInput,
   normalizeIntegrationWebhookAuthInput,
 } from "./integration-config";
 
 describe("integration-config", () => {
+  it("lists IANA time zones sorted, deduped, and including the default", () => {
+    const zones = listIanaTimeZones();
+    expect(zones.length).toBeGreaterThan(0);
+    expect(zones).toContain(DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE);
+    expect(zones.every((zone) => isValidIanaTimeZone(zone))).toBe(true);
+
+    const sorted = [...zones].sort((a, b) => a.localeCompare(b));
+    expect(zones).toEqual(sorted);
+    expect(new Set(zones).size).toBe(zones.length);
+  });
+
   it("reports environment fallback secrets without exposing them", () => {
     const summary = getPublicIntegrationWebhookAuth(
       {

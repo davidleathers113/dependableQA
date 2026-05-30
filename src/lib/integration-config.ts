@@ -37,6 +37,27 @@ export function isValidIanaTimeZone(value: string): boolean {
   return getIanaTimeZoneSet().has(zone);
 }
 
+let cachedIanaTimeZoneList: readonly string[] | null = null;
+
+/**
+ * Sorted list of IANA time zone identifiers supported by the runtime, for
+ * populating selectors. Falls back to the default zone when the runtime does
+ * not expose `Intl.supportedValuesOf` (older engines), so the dropdown is never
+ * empty.
+ */
+export function listIanaTimeZones(): readonly string[] {
+  if (cachedIanaTimeZoneList) {
+    return cachedIanaTimeZoneList;
+  }
+  const list = Array.from(getIanaTimeZoneSet());
+  if (list.length === 0) {
+    list.push(DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE);
+  }
+  list.sort((a, b) => a.localeCompare(b));
+  cachedIanaTimeZoneList = list;
+  return cachedIanaTimeZoneList;
+}
+
 export interface PublicIntegrationWebhookAuth {
   authType: IntegrationWebhookAuthType;
   headerName: string;
