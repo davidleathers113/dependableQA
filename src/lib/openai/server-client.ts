@@ -30,7 +30,9 @@ export function getOpenAiServerConfig(): OpenAiServerConfig {
     transcriptionModel: asString(env.OPENAI_TRANSCRIPTION_MODEL) || "gpt-4o-transcribe-diarize",
     analysisModel: asString(env.OPENAI_ANALYSIS_MODEL) || "gpt-4.1-mini",
     analysisFallbackModel: asString(env.OPENAI_ANALYSIS_FALLBACK_MODEL) || "gpt-4.1",
-    analysisPromptVersion: asString(env.OPENAI_ANALYSIS_PROMPT_VERSION) || "v1",
+    // v2 adds agent/customer role-inference guidance. Bumping this changes the
+    // analysis version (and dedupe key), so calls re-analyze on their next job.
+    analysisPromptVersion: asString(env.OPENAI_ANALYSIS_PROMPT_VERSION) || "v2",
     analysisSchemaVersion: asString(env.OPENAI_ANALYSIS_SCHEMA_VERSION) || "v1",
   };
 }

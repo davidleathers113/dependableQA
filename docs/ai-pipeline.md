@@ -36,6 +36,8 @@ Job types: **`transcription`** then **`analysis`**. The `calls` table carries `t
 
 Analysis jobs carry an `analysisVersionKey` derived from `OPENAI_ANALYSIS_PROMPT_VERSION:OPENAI_ANALYSIS_SCHEMA_VERSION` (or an explicit `analysisVersionKey`/`reanalysisKey`/`dedupeSuffix` in the payload). This is folded into the dedupe key so that **bumping the prompt or schema version produces a distinct key and re-analysis is not suppressed** by the dedupe guard. Bump these env values when you change the analysis prompt or output schema.
 
+The default `OPENAI_ANALYSIS_PROMPT_VERSION` is **`v2`** (raised from `v1`): the analysis instructions now tell the model that diarization speaker labels don't reliably identify who is the agent vs. the customer and to **infer those roles from context** (the agent qualifies/scripts/quotes; the customer inquires/answers), attributing `agentQuality` and `customerIntent` accordingly. Because the version changed, calls analyzed under `v1` will **re-analyze** on their next analysis job — a deliberate one-time spend. (Transcription language stays auto-detect; the Ringba path supplies no language hint.)
+
 ## Models & config (`src/lib/openai/server-client.ts`)
 
 Read from env, with defaults:

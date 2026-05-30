@@ -11,7 +11,7 @@ vi.mock("../lib/openai/server-client", () => ({
   getOpenAiServerConfig: getOpenAiServerConfigMock,
 }));
 
-import { analyzeCall } from "./analyze-call";
+import { analyzeCall, buildAnalysisInstructions } from "./analyze-call";
 
 function createClient(existingAnalysis: Record<string, unknown> | null = null) {
   const insertedFlags: Array<Record<string, unknown>> = [];
@@ -152,6 +152,15 @@ describe("analyzeCall", () => {
       analysisPromptVersion: "v1",
       analysisSchemaVersion: "v1",
     });
+  });
+
+  it("instructs the model to infer agent vs customer roles from context", () => {
+    const text = buildAnalysisInstructions("v2");
+    expect(text).toContain("Prompt version: v2.");
+    expect(text).toContain("AGENT represents the business");
+    expect(text).toContain("CUSTOMER has the need");
+    expect(text).toContain("Attribute agentQuality strictly to the inferred agent");
+    expect(text).toContain("do NOT reliably identify who is the agent");
   });
 
   it("skips OpenAI when an analysis at the active version already exists", async () => {

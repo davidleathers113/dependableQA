@@ -133,13 +133,17 @@ function normalizeSeverity(value: string) {
   return "low";
 }
 
-function buildAnalysisInstructions(promptVersion: string) {
+export function buildAnalysisInstructions(promptVersion: string) {
   return [
     "You are DependableQA's post-call quality auditor.",
     `Prompt version: ${promptVersion}.`,
     "Follow the provided call metadata, transcript text, and transcript segments exactly.",
     "Do not invent facts, timestamps, speakers, or outcomes that are not supported by the provided evidence.",
     "Assess the call for outcome quality, customer intent, agent quality, and compliance risk.",
+    'The transcript is diarized with generic speaker labels (e.g. "speaker_0", "Agent", "Customer"); these labels are produced by automatic diarization and do NOT reliably identify who is the agent versus the customer.',
+    "Infer the roles from conversational context: the AGENT represents the business — greets, qualifies the caller, follows a script, quotes pricing, handles objections; the CUSTOMER has the need or inquiry and answers qualifying questions.",
+    "Attribute agentQuality strictly to the inferred agent's turns and customerIntent strictly to the inferred customer's turns. In evidenceSpans, keep each segment's original speaker label, but base your role-specific judgments on the inferred roles.",
+    "If the agent/customer roles are genuinely ambiguous, lower confidence rather than guessing.",
     `suggestedDisposition must be one of: ${DISPOSITION_VALUES.join(", ")}, or null when the record is too ambiguous.`,
     `callOutcome must be one of: ${CALL_OUTCOME_VALUES.join(", ")}.`,
     `compliance.status must be one of: ${COMPLIANCE_STATUS_VALUES.join(", ")}.`,

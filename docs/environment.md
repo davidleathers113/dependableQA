@@ -29,7 +29,7 @@ Single source of truth for runtime configuration. `.env-example` documents the c
 | `OPENAI_TRANSCRIPTION_MODEL` | no | `gpt-4o-transcribe-diarize` |
 | `OPENAI_ANALYSIS_MODEL` | no | `gpt-4.1-mini` |
 | `OPENAI_ANALYSIS_FALLBACK_MODEL` | no | `gpt-4.1` |
-| `OPENAI_ANALYSIS_PROMPT_VERSION` | no | `v1` |
+| `OPENAI_ANALYSIS_PROMPT_VERSION` | no | `v2` |
 | `OPENAI_ANALYSIS_SCHEMA_VERSION` | no | `v1` |
 
 Bump the prompt/schema versions to force re-analysis (see [ai-pipeline](ai-pipeline.md#analysis-versioning)).
