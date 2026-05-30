@@ -13,7 +13,8 @@
     "ci:verify": "npm run check:env-example && npm run check:migrations && npm test && npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:db": "vitest run --config vitest.db.config.ts"
+    "test:db": "vitest run --config vitest.db.config.ts",
+    "e2e:seed": "node tests/e2e/seed.mjs"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",
