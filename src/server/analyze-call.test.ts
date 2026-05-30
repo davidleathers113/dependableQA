@@ -11,7 +11,7 @@ vi.mock("../lib/openai/server-client", () => ({
   getOpenAiServerConfig: getOpenAiServerConfigMock,
 }));
 
-import { analyzeCall, buildAnalysisInstructions } from "./analyze-call";
+import { analyzeCall, buildAnalysisInstructions, buildAnalysisTextFormat } from "./analyze-call";
 
 function createClient(existingAnalysis: Record<string, unknown> | null = null) {
   const insertedFlags: Array<Record<string, unknown>> = [];
@@ -152,6 +152,20 @@ describe("analyzeCall", () => {
       analysisPromptVersion: "v1",
       analysisSchemaVersion: "v1",
     });
+  });
+
+  it("omits verbosity for gpt-4.1 models (they 400 on 'low') and sends it for gpt-5", () => {
+    // Regression: gpt-4.1-mini/gpt-4.1 reject text.verbosity:'low' with a 400,
+    // which failed every analysis under the default models.
+    const mini = buildAnalysisTextFormat("gpt-4.1-mini");
+    expect("verbosity" in mini).toBe(false);
+    expect(mini.format).toBeDefined();
+
+    const full = buildAnalysisTextFormat("gpt-4.1");
+    expect("verbosity" in full).toBe(false);
+
+    const gpt5 = buildAnalysisTextFormat("gpt-5-mini") as { verbosity?: string };
+    expect(gpt5.verbosity).toBe("low");
   });
 
   it("instructs the model to infer agent vs customer roles from context", () => {

@@ -280,6 +280,20 @@ function buildAnalysisInput(context: AnalysisContext) {
   ].join("\n");
 }
 
+/**
+ * Build the `text` payload for the Responses API. `verbosity` is only honored by
+ * the GPT-5 family; gpt-4.1* models reject `"low"` (they accept only `"medium"`)
+ * with a 400, which previously failed every analysis under the default models. So
+ * we send `verbosity` only for GPT-5 models and omit it otherwise (API default).
+ */
+export function buildAnalysisTextFormat(modelName: string) {
+  const format = zodTextFormat(callAnalysisSchema, "dependableqa_call_analysis");
+  if (modelName.trim().toLowerCase().startsWith("gpt-5")) {
+    return { format, verbosity: "low" as const };
+  }
+  return { format };
+}
+
 async function requestStructuredAnalysis(
   modelName: string,
   instructions: string,
@@ -291,10 +305,7 @@ async function requestStructuredAnalysis(
     instructions,
     input,
     prompt_cache_key: promptCacheKey,
-    text: {
-      format: zodTextFormat(callAnalysisSchema, "dependableqa_call_analysis"),
-      verbosity: "low",
-    },
+    text: buildAnalysisTextFormat(modelName),
   });
 
   const parsed = response.output_parsed;
