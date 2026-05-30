@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isIP } from "node:net";
 import { toFile } from "openai";
 import type { Database, Json } from "../../supabase/types";
 import { getOpenAiClient, getOpenAiServerConfig } from "../lib/openai/server-client";
+import { createNonRetryableError, fetchRecordingWithGuards } from "./recording-fetch";
 
 type SupabaseAny = SupabaseClient<Database>;
 
@@ -29,28 +29,12 @@ interface MinimalDiarizedTranscription {
   usage?: unknown;
 }
 
-type NonRetryableError = Error & { retryable?: boolean };
-
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
 function asNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function inferFileExtension(contentType: string, sourceName: string) {
-  const normalizedType = contentType.trim().toLowerCase();
-  const normalizedName = sourceName.trim().toLowerCase();
-
-  if (normalizedName.endsWith(".mp3") || normalizedType.includes("mpeg")) return ".mp3";
-  if (normalizedName.endsWith(".wav") || normalizedType.includes("wav")) return ".wav";
-  if (normalizedName.endsWith(".m4a") || normalizedType.includes("mp4") || normalizedType.includes("m4a")) return ".m4a";
-  if (normalizedName.endsWith(".mp4")) return ".mp4";
-  if (normalizedName.endsWith(".webm") || normalizedType.includes("webm")) return ".webm";
-  if (normalizedName.endsWith(".ogg") || normalizedType.includes("ogg")) return ".ogg";
-
-  return ".audio";
 }
 
 function normalizeSpeaker(value: string | undefined) {
@@ -107,85 +91,6 @@ function inferDurationSeconds(
   return callDuration ?? 0;
 }
 
-function createNonRetryableError(message: string) {
-  const error = new Error(message) as NonRetryableError;
-  error.retryable = false;
-  return error;
-}
-
-function isBlockedIpv4Host(hostname: string) {
-  const parts = hostname.split(".").map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return false;
-  }
-
-  if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) {
-    return true;
-  }
-
-  if (parts[0] === 169 && parts[1] === 254) {
-    return true;
-  }
-
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) {
-    return true;
-  }
-
-  return parts[0] === 192 && parts[1] === 168;
-}
-
-function isBlockedIpv6Host(hostname: string) {
-  const normalized = hostname.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-
-  if (normalized === "::1") {
-    return true;
-  }
-
-  return (
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe8") ||
-    normalized.startsWith("fe9") ||
-    normalized.startsWith("fea") ||
-    normalized.startsWith("feb")
-  );
-}
-
-function assertSafeRecordingUrl(urlText: string) {
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(urlText);
-  } catch {
-    throw createNonRetryableError("Recording URL is invalid.");
-  }
-
-  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-    throw createNonRetryableError("Recording URL must use http or https.");
-  }
-
-  const hostname = parsedUrl.hostname.trim().toLowerCase();
-  if (!hostname) {
-    throw createNonRetryableError("Recording URL hostname is required.");
-  }
-
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
-    throw createNonRetryableError("Recording URL hostname is not allowed.");
-  }
-
-  const ipVersion = isIP(hostname);
-  if (
-    (ipVersion === 4 && isBlockedIpv4Host(hostname)) ||
-    (ipVersion === 6 && isBlockedIpv6Host(hostname))
-  ) {
-    throw createNonRetryableError("Recording URL must not target a private or loopback host.");
-  }
-
-  return parsedUrl;
-}
-
 async function loadCallForTranscription(client: SupabaseAny, organizationId: string, callId: string) {
   const result = await client
     .from("calls")
@@ -221,20 +126,14 @@ async function downloadRecordingFromUrl(
   callRow: Record<string, unknown>,
   urlText: string
 ) {
-  const safeUrl = assertSafeRecordingUrl(urlText);
-  const response = await fetch(urlText);
-  if (!response.ok) {
-    throw new Error(`Unable to fetch recording. Upstream returned ${response.status}.`);
-  }
+  // Validates the host, follows redirects safely (re-checking every hop),
+  // enforces the size cap BEFORE we store anything, and resolves a real audio
+  // extension from magic bytes (never ".audio").
+  const fetched = await fetchRecordingWithGuards(urlText, { maxBytes: MAX_AUDIO_BYTES });
+  const storagePath = `${asString(callRow.organization_id)}/${asString(callRow.id)}${fetched.extension}`;
 
-  const contentType = response.headers.get("content-type")?.trim() || "audio/mpeg";
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const rawName = safeUrl.pathname.split("/").at(-1) || "recording";
-  const extension = inferFileExtension(contentType, rawName);
-  const storagePath = `${asString(callRow.organization_id)}/${asString(callRow.id)}${extension}`;
-
-  const upload = await client.storage.from("recordings").upload(storagePath, bytes, {
-    contentType,
+  const upload = await client.storage.from("recordings").upload(storagePath, fetched.bytes, {
+    contentType: fetched.contentType,
     upsert: true,
   });
   if (upload.error) {
@@ -254,9 +153,9 @@ async function downloadRecordingFromUrl(
   }
 
   return {
-    bytes,
-    contentType,
-    fileName: rawName.endsWith(extension) ? rawName : `${rawName}${extension}`,
+    bytes: fetched.bytes,
+    contentType: fetched.contentType,
+    fileName: `recording${fetched.extension}`,
     storagePath,
   } satisfies RecordingSource;
 }

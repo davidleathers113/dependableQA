@@ -49,7 +49,15 @@ The OpenAI client is created lazily and cached. `OPENAI_API_KEY` is required; `O
 
 ## Transcription
 
-`transcribe-call.ts` loads the recording (max 25 MB), sends it to OpenAI, and stores a diarized transcript (segments with speaker/text/start/end). Recording-source resolution guards against SSRF-style fetches (`node:net` IP checks).
+`transcribe-call.ts` loads the recording (max 25 MB), sends it to OpenAI, and stores a diarized transcript (segments with speaker/text/start/end).
+
+Recording downloads from a URL (e.g. a Ringba `recordingUrl`, which 302-redirects to S3) go through the shared **`src/server/recording-fetch.ts`** (`fetchRecordingWithGuards`). It:
+
+- follows redirects **manually** and re-runs the SSRF host check on **every** hop (so a `Location` header can't redirect into a private/loopback host — the pixel path accepts a caller-supplied `recording_url`), capped at 5 redirects;
+- enforces the size cap from `Content-Length` **and** while streaming, so an oversized body is rejected **before** any Supabase upload and is never buffered unbounded into memory;
+- resolves the audio format from **magic bytes → content-type → URL path**, and throws (never emits a bogus `.audio`) when the format is unidentifiable;
+- marks `400/401/403/404/410` as **non-retryable** (a dead/expired link fails fast instead of burning the job's retry budget); `5xx`/network/timeout stay retryable;
+- never logs the URL, query string, or any `Authorization` header (they can carry signed credentials), and only sends provider auth to a verified host on the first hop, never across a redirect. Ringba's public recording URLs need **no** auth — proven by `scripts/ringba-recording-smoke.mjs` (`npm run ringba:smoke-recording`).
 
 ## Analysis
 

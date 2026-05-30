@@ -206,13 +206,12 @@ describe("transcribeCall", () => {
         callId: "call_1",
         language: "en",
       })
-    ).rejects.toThrow(
-      "Recording exceeds the 25 MB transcription limit. Upload a smaller file or add chunking support before retrying."
-    );
+    ).rejects.toThrow("Recording exceeds the maximum allowed size of 25 MB.");
 
     expect(transcriptionCreateMock).not.toHaveBeenCalled();
     expect(transcriptWrites).toHaveLength(0);
-    expect(uploads).toHaveLength(1);
+    // Regression: oversized recordings must be rejected BEFORE the storage upload.
+    expect(uploads).toHaveLength(0);
   });
 
   it("rejects localhost recording URLs before fetching them", async () => {
