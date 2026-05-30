@@ -37,6 +37,12 @@ export function IntegrationDetailWorkspace({
   const canManage = currentUserRole === "owner" || currentUserRole === "admin";
   const [errorMessage, setErrorMessage] = React.useState("");
   const [successMessage, setSuccessMessage] = React.useState("");
+  // Dedicated, panel-local feedback for "Test connection" so the result shows
+  // next to the button at the bottom of the panel — not only in the page-top
+  // message box (which is off-screen when you click Test).
+  const [ringbaTestNotice, setRingbaTestNotice] = React.useState<{ type: "success" | "error"; text: string } | null>(
+    null
+  );
   const [highlightHealth, setHighlightHealth] = React.useState(false);
   const [highlightSetup, setHighlightSetup] = React.useState(false);
   const healthPanelRef = React.useRef<HTMLDivElement | null>(null);
@@ -175,7 +181,7 @@ export function IntegrationDetailWorkspace({
   });
 
   const ringbaTestMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input: { ringbaAccountId: string; apiAccessToken: string; callLogsTimeZone: string }) => {
       const response = await fetch("/api/settings/integrations", {
         method: "POST",
         headers: {
@@ -184,6 +190,11 @@ export function IntegrationDetailWorkspace({
         body: JSON.stringify({
           action: "test-ringba-connection",
           integrationId: integration.id,
+          // Test what's currently typed in the form so users can validate before
+          // saving; a blank token falls back to the saved one server-side.
+          ringbaAccountId: input.ringbaAccountId,
+          apiAccessToken: input.apiAccessToken,
+          callLogsTimeZone: input.callLogsTimeZone,
         }),
       });
 
@@ -194,13 +205,17 @@ export function IntegrationDetailWorkspace({
 
       return payload;
     },
+    onMutate: () => {
+      setRingbaTestNotice(null);
+    },
     onSuccess: (payload) => {
-      setErrorMessage("");
-      setSuccessMessage(payload.message ?? "Ringba connection test succeeded.");
+      setRingbaTestNotice({ type: "success", text: payload.message ?? "Ringba connection test succeeded." });
     },
     onError: (error) => {
-      setSuccessMessage("");
-      setErrorMessage(error instanceof Error ? error.message : "Ringba connection test failed.");
+      setRingbaTestNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Ringba connection test failed.",
+      });
     },
   });
 
@@ -325,9 +340,10 @@ export function IntegrationDetailWorkspace({
             isCreating={isCreatingIntegration}
             isSyncing={ringbaSyncMutation.isPending}
             isTesting={ringbaTestMutation.isPending}
+            testNotice={ringbaTestNotice}
             onSave={(input) => ringbaApiMutation.mutate(input)}
             onSyncNow={() => ringbaSyncMutation.mutate()}
-            onTestConnection={() => ringbaTestMutation.mutate()}
+            onTestConnection={(input) => ringbaTestMutation.mutate(input)}
           />
           <RingbaImportPanel integration={integration} canManage={canManage} />
         </>

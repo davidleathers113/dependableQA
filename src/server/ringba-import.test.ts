@@ -284,12 +284,42 @@ describe("testRingbaConnection", () => {
     mocks.getRingbaApiAccessTokenFromConfig.mockReturnValue("");
     const result = await testRingbaConnection(integration());
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("not configured");
+    expect(result.error).toContain("before testing");
   });
 
   it("returns an error when the Ringba request fails", async () => {
     mocks.fetchRingbaCallLogsPage.mockRejectedValueOnce(new Error("unauthorized"));
     const result = await testRingbaConnection(integration());
     expect(result).toMatchObject({ ok: false, error: "unauthorized" });
+  });
+
+  it("tests the form overrides (typed creds) before they are saved", async () => {
+    // Nothing saved yet (empty saved token + blank saved account).
+    mocks.getRingbaApiAccessTokenFromConfig.mockReturnValue("");
+    mocks.getPublicIntegrationRingbaConfig.mockReturnValue(pubConfig({ ringbaAccountId: "" }));
+    mocks.fetchRingbaCallLogsPage.mockResolvedValueOnce({ report: { records: [] } });
+
+    const result = await testRingbaConnection(integration(), {
+      accountId: "typed_acct",
+      apiToken: "typed_tok",
+      timeZone: "America/New_York",
+    });
+
+    expect(result).toEqual({ ok: true, sampleCount: 0 });
+    expect(mocks.fetchRingbaCallLogsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "typed_acct", apiToken: "typed_tok", formatTimeZone: "America/New_York" })
+    );
+  });
+
+  it("falls back to the saved token when the override token is blank", async () => {
+    mocks.getRingbaApiAccessTokenFromConfig.mockReturnValue("saved_tok");
+    mocks.fetchRingbaCallLogsPage.mockResolvedValueOnce({ report: { records: [{ id: "r1" }] } });
+
+    const result = await testRingbaConnection(integration(), { accountId: "acct_override", apiToken: "" });
+
+    expect(result).toEqual({ ok: true, sampleCount: 1 });
+    expect(mocks.fetchRingbaCallLogsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "acct_override", apiToken: "saved_tok" })
+    );
   });
 });

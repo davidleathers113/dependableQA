@@ -376,7 +376,13 @@ export const POST: APIRoute = async (context) => {
         return json({ error: "Ringba integration not found." }, 404);
       }
 
-      const outcome = await testRingbaConnection(integration);
+      // Test the values currently in the form (so users can validate before
+      // saving); a blank token falls back to the saved one inside the function.
+      const outcome = await testRingbaConnection(integration, {
+        accountId: asString(body.ringbaAccountId) || undefined,
+        apiToken: asString(body.apiAccessToken) || undefined,
+        timeZone: asString(body.callLogsTimeZone) || undefined,
+      });
       if (!outcome.ok) {
         return json({ error: outcome.error ?? "Ringba connection test failed." }, 400);
       }

@@ -193,8 +193,12 @@ describe("runRingbaApiSyncForIntegration", () => {
   });
 
   it("skips when the poll interval has not elapsed", async () => {
+    // runRingbaApiSyncForIntegration compares against the REAL clock (unlike the
+    // injectable-`now` helper above), so anchor last-sync to "just now" rather
+    // than the fixed NOW constant — otherwise this test breaks once wall-clock
+    // passes NOW + pollInterval.
     mocks.getPublicIntegrationRingbaConfig.mockReturnValue(
-      pubConfig({ lastRingbaApiSyncAt: new Date(NOW).toISOString(), pollIntervalMinutes: 600 })
+      pubConfig({ lastRingbaApiSyncAt: new Date().toISOString(), pollIntervalMinutes: 600 })
     );
     const result = await runRingbaApiSyncForIntegration(fakeClient() as never, integration(), {});
     expect(result).toMatchObject({ ok: true, skipped: true });

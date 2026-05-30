@@ -74,21 +74,40 @@ export interface RingbaConnectionTestResult {
 }
 
 /**
+ * Optional credential overrides supplied by the settings form so a user can
+ * test what they just typed BEFORE saving. A blank/absent token falls back to
+ * the saved token (so an already-configured integration can be re-tested
+ * without re-entering the secret).
+ */
+export interface RingbaConnectionTestOverrides {
+  accountId?: string;
+  apiToken?: string;
+  timeZone?: string;
+}
+
+/**
  * Verify Ringba credentials by fetching a tiny (size 1) call-logs sample over a
  * short recent window. Does NOT import anything and records no integration event —
  * it is a pure connectivity/credential check for the settings UI.
  */
 export async function testRingbaConnection(
-  integration: IntegrationContext
+  integration: IntegrationContext,
+  overrides?: RingbaConnectionTestOverrides
 ): Promise<RingbaConnectionTestResult> {
   const pub = getPublicIntegrationRingbaConfig(integration.config);
-  const token = getRingbaApiAccessTokenFromConfig(integration.config);
-  const accountId = pub.ringbaAccountId.trim();
+  const savedToken = getRingbaApiAccessTokenFromConfig(integration.config);
+  const accountId = (overrides?.accountId ?? pub.ringbaAccountId).trim();
+  // Prefer a freshly-typed token; fall back to the saved one.
+  const token = (overrides?.apiToken?.trim() || savedToken || "").trim();
   if (!token || !accountId) {
-    return { ok: false, sampleCount: 0, error: "Ringba API token or account id is not configured." };
+    return {
+      ok: false,
+      sampleCount: 0,
+      error: "Enter the Ringba account id and API token above (or save settings) before testing.",
+    };
   }
 
-  const timeZone = pub.callLogsTimeZone.trim() || "America/Chicago";
+  const timeZone = (overrides?.timeZone ?? pub.callLogsTimeZone).trim() || "America/Chicago";
   const { reportStart, reportEnd } = buildRingbaCallLogsReportRange(24);
 
   try {

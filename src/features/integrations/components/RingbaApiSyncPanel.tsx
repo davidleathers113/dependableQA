@@ -29,9 +29,10 @@ interface Props {
   isCreating: boolean;
   isSyncing: boolean;
   isTesting: boolean;
+  testNotice?: { type: "success" | "error"; text: string } | null;
   onSave: (input: RingbaApiSyncFormInput) => void;
   onSyncNow: () => void;
-  onTestConnection: () => void;
+  onTestConnection: (input: { ringbaAccountId: string; apiAccessToken: string; callLogsTimeZone: string }) => void;
 }
 
 export function RingbaApiSyncPanel({
@@ -41,6 +42,7 @@ export function RingbaApiSyncPanel({
   isCreating,
   isSyncing,
   isTesting,
+  testNotice,
   onSave,
   onSyncNow,
   onTestConnection,
@@ -297,7 +299,13 @@ export function RingbaApiSyncPanel({
         </button>
         <button
           type="button"
-          onClick={onTestConnection}
+          onClick={() =>
+            onTestConnection({
+              ringbaAccountId: accountId.trim(),
+              apiAccessToken: apiToken.trim(),
+              callLogsTimeZone: timeZone.trim(),
+            })
+          }
           disabled={disabled || isTesting}
           className="inline-flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-violet-500/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -314,6 +322,18 @@ export function RingbaApiSyncPanel({
           {isSyncing ? "Syncing…" : "Run sync now"}
         </button>
       </div>
+
+      {testNotice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            testNotice.type === "success"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+              : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+          }`}
+        >
+          {testNotice.text}
+        </div>
+      ) : null}
     </section>
   );
 }
