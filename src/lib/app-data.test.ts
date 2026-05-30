@@ -63,6 +63,29 @@ describe("calls filter helpers", () => {
     expect(params.get("sortDirection")).toBe("asc");
     expect(params.get("dateFrom")).toBeNull();
   });
+
+  it("round-trips the disposition-intelligence filters through URL params", () => {
+    const params = filtersToSearchParams({
+      ...DEFAULT_CALL_FILTERS,
+      finalDisposition: "sale_completed",
+      conversionStatus: "sale_completed",
+      fraudRisk: "high",
+      leadQuality: "suspected_fraud",
+    });
+
+    expect(params.get("finalDisposition")).toBe("sale_completed");
+    expect(params.get("conversionStatus")).toBe("sale_completed");
+    expect(params.get("fraudRisk")).toBe("high");
+    expect(params.get("leadQuality")).toBe("suspected_fraud");
+
+    expect(buildCallFilters(params)).toEqual({
+      ...DEFAULT_CALL_FILTERS,
+      finalDisposition: "sale_completed",
+      conversionStatus: "sale_completed",
+      fraudRisk: "high",
+      leadQuality: "suspected_fraud",
+    });
+  });
 });
 
 describe("billing summary helpers", () => {

@@ -36,7 +36,11 @@ Job types: **`transcription`** then **`analysis`**. The `calls` table carries `t
 
 Analysis jobs carry an `analysisVersionKey` derived from `OPENAI_ANALYSIS_PROMPT_VERSION:OPENAI_ANALYSIS_SCHEMA_VERSION` (or an explicit `analysisVersionKey`/`reanalysisKey`/`dedupeSuffix` in the payload). This is folded into the dedupe key so that **bumping the prompt or schema version produces a distinct key and re-analysis is not suppressed** by the dedupe guard. Bump these env values when you change the analysis prompt or output schema.
 
-The default `OPENAI_ANALYSIS_PROMPT_VERSION` is **`v2`** (raised from `v1`): the analysis instructions now tell the model that diarization speaker labels don't reliably identify who is the agent vs. the customer and to **infer those roles from context** (the agent qualifies/scripts/quotes; the customer inquires/answers), attributing `agentQuality` and `customerIntent` accordingly. Because the version changed, calls analyzed under `v1` will **re-analyze** on their next analysis job — a deliberate one-time spend. (Transcription language stays auto-detect; the Ringba path supplies no language hint.)
+`OPENAI_ANALYSIS_PROMPT_VERSION` **`v2`** added the agent/customer role-inference guidance (diarization speaker labels don't reliably identify who is the agent vs. the customer, so infer roles from context — the agent qualifies/scripts/quotes; the customer inquires/answers).
+
+The current default is **prompt `v3` + schema `v2`** (key `v3:v2`), which adds the **disposition-intelligence block** to the analysis output: a vertical-agnostic, evidence-backed read of every call along four axes — *what happened* (`finalDisposition`, `journeyStageReached`), *was it valuable* (`qualification`, `customerIntent.expressedInterest`, `conversion`, `leadQuality`), and *was it risky* (`fraud`). The top-level QA fields (`suggestedDisposition`, `callOutcome`, `compliance`, `flags`, `scoring`) are unchanged. The block's filterable axes are denormalized onto `calls.ai_*` columns (migration 0019) by the analysis write path for list/report filtering; the full detail stays in `call_analyses.structured_output`.
+
+This bump is **forward-only**: new analyses are written at `v3:v2`, while existing `v2:v1` analyses are left in place and are **not** mass-re-enqueued. A call only gets a `v3:v2` analysis when it is newly analyzed or **deliberately re-run** through the metered `analyze-selected` gate (re-running an already-analyzed call is idempotent per `(call, version)` and reserves/debits the wallet like any analysis). The Disposition tab shows a "re-analyze to generate" empty state for calls that only have a pre-`v3` analysis. (Transcription language stays auto-detect; the Ringba path supplies no language hint.)
 
 ## Models & config (`src/lib/openai/server-client.ts`)
 
@@ -47,8 +51,8 @@ Read from env, with defaults:
 | Transcription model | `OPENAI_TRANSCRIPTION_MODEL` | `gpt-4o-transcribe-diarize` |
 | Analysis model | `OPENAI_ANALYSIS_MODEL` | `gpt-4.1-mini` |
 | Analysis fallback | `OPENAI_ANALYSIS_FALLBACK_MODEL` | `gpt-4.1` |
-| Prompt version | `OPENAI_ANALYSIS_PROMPT_VERSION` | `v1` |
-| Schema version | `OPENAI_ANALYSIS_SCHEMA_VERSION` | `v1` |
+| Prompt version | `OPENAI_ANALYSIS_PROMPT_VERSION` | `v3` |
+| Schema version | `OPENAI_ANALYSIS_SCHEMA_VERSION` | `v2` |
 
 The OpenAI client is created lazily and cached. `OPENAI_API_KEY` is required; `OPENAI_WEBHOOK_SECRET` is optional.
 

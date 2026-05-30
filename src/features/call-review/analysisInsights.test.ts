@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatConfidence, formatScore, parseAnalysisInsights } from "./analysisInsights";
+import { formatConfidence, formatScore, humanizeToken, parseAnalysisInsights } from "./analysisInsights";
 
 describe("parseAnalysisInsights", () => {
   it("returns null for null/undefined/non-object input", () => {
@@ -41,6 +41,45 @@ describe("parseAnalysisInsights", () => {
     // confidence > 1 is invalid; safeParse fails -> null rather than crash
     const insights = parseAnalysisInsights({ confidence: 5 });
     expect(insights).toBeNull();
+  });
+
+  it("parses the disposition-intelligence block and expressedInterest", () => {
+    const insights = parseAnalysisInsights({
+      customerIntent: { primaryIntent: "buy", expressedInterest: { status: "yes", strength: "strong" } },
+      disposition: {
+        finalDisposition: "qualified_no_conversion",
+        journeyStageReached: "offer_presented",
+        confidence: 0.84,
+        qualification: { status: "qualified", criteria: [{ key: "service_area", status: "met" }] },
+        conversion: { status: "none", conversionType: "none" },
+        fraud: { riskLevel: "low", fraudLikely: false, categories: [], indicators: [] },
+        leadQuality: { status: "acceptable", billableRecommendation: "billable" },
+      },
+    });
+
+    expect(insights?.customerIntent?.expressedInterest?.strength).toBe("strong");
+    expect(insights?.disposition?.finalDisposition).toBe("qualified_no_conversion");
+    expect(insights?.disposition?.fraud?.riskLevel).toBe("low");
+    expect(insights?.disposition?.qualification?.criteria?.[0]?.key).toBe("service_area");
+  });
+
+  it("keeps the disposition block undefined for pre-v3 payloads", () => {
+    const insights = parseAnalysisInsights({ callOutcome: "qualified" });
+    expect(insights?.disposition).toBeUndefined();
+  });
+});
+
+describe("humanizeToken", () => {
+  it("turns snake_case enum tokens into readable labels", () => {
+    expect(humanizeToken("qualified_no_conversion")).toBe("Qualified no conversion");
+    expect(humanizeToken("sale_completed")).toBe("Sale completed");
+    expect(humanizeToken("high")).toBe("High");
+  });
+
+  it("returns null for empty/nullish input", () => {
+    expect(humanizeToken(null)).toBeNull();
+    expect(humanizeToken(undefined)).toBeNull();
+    expect(humanizeToken("")).toBeNull();
   });
 });
 

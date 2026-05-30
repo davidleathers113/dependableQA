@@ -30,10 +30,14 @@ export function getOpenAiServerConfig(): OpenAiServerConfig {
     transcriptionModel: asString(env.OPENAI_TRANSCRIPTION_MODEL) || "gpt-4o-transcribe-diarize",
     analysisModel: asString(env.OPENAI_ANALYSIS_MODEL) || "gpt-4.1-mini",
     analysisFallbackModel: asString(env.OPENAI_ANALYSIS_FALLBACK_MODEL) || "gpt-4.1",
-    // v2 adds agent/customer role-inference guidance. Bumping this changes the
-    // analysis version (and dedupe key), so calls re-analyze on their next job.
-    analysisPromptVersion: asString(env.OPENAI_ANALYSIS_PROMPT_VERSION) || "v2",
-    analysisSchemaVersion: asString(env.OPENAI_ANALYSIS_SCHEMA_VERSION) || "v1",
+    // v2 adds agent/customer role-inference guidance; v3 adds the disposition-
+    // intelligence block (final disposition, journey stage, qualification,
+    // conversion, fraud, lead quality) and schema v2 carries its new shape.
+    // Bumping either changes the analysis version (and dedupe key); this is
+    // forward-only — new analyses get v3:v2, existing v2:v1 rows are untouched
+    // and only re-analyze when deliberately re-run via the metered analyze gate.
+    analysisPromptVersion: asString(env.OPENAI_ANALYSIS_PROMPT_VERSION) || "v3",
+    analysisSchemaVersion: asString(env.OPENAI_ANALYSIS_SCHEMA_VERSION) || "v2",
   };
 }
 

@@ -6,11 +6,12 @@ import { formatTimestamp } from "./formatTime";
 import {
   formatConfidence,
   formatScore,
+  humanizeToken,
   parseAnalysisInsights,
   type AnalysisInsights,
 } from "./analysisInsights";
 
-export type QaTab = "summary" | "flags" | "notes" | "qa";
+export type QaTab = "summary" | "disposition" | "flags" | "notes" | "qa";
 
 interface Props {
   detail: CallDetail;
@@ -33,6 +34,7 @@ interface Props {
 
 const TABS: Array<{ id: QaTab; label: string }> = [
   { id: "summary", label: "Summary" },
+  { id: "disposition", label: "Disposition" },
   { id: "flags", label: "Flags" },
   { id: "notes", label: "Notes" },
   { id: "qa", label: "QA" },
@@ -96,6 +98,7 @@ export function QaPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {tab === "summary" && <SummaryTab detail={detail} insights={insights} hasAnalysis={hasAnalysis} />}
+        {tab === "disposition" && <DispositionTab insights={insights} />}
         {tab === "flags" && (
           <FlagsTab
             detail={detail}
@@ -175,6 +178,233 @@ function SummaryTab({
       )}
     </div>
   );
+}
+
+function DispositionTab({ insights }: { insights: AnalysisInsights | null }) {
+  const d = insights?.disposition;
+  const interest = insights?.customerIntent?.expressedInterest;
+
+  // Pre-v3 analyses have no disposition block: prompt a re-analysis.
+  if (!d && !interest) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 px-4 py-6 text-center">
+        <p className="text-sm font-medium text-slate-300">Disposition intelligence isn’t available for this analysis.</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Re-analyze this call to generate the final disposition, journey stage, qualification, conversion, fraud, and
+          lead-quality read.
+        </p>
+      </div>
+    );
+  }
+
+  const finalDisposition = humanizeToken(d?.finalDisposition);
+  const journeyStage = humanizeToken(d?.journeyStageReached);
+  const dispoConfidence = formatConfidence(d?.confidence);
+  const qualification = d?.qualification;
+  const conversion = d?.conversion;
+  const fraud = d?.fraud;
+  const leadQuality = d?.leadQuality;
+
+  const interestLabel = interest
+    ? [humanizeToken(interest.status), humanizeToken(interest.strength)].filter(Boolean).join(" · ")
+    : null;
+
+  return (
+    <div className="space-y-5">
+      {/* What happened */}
+      <dl className="grid grid-cols-2 gap-2 text-xs">
+        {finalDisposition && <Fact label="Final disposition" value={finalDisposition} />}
+        {journeyStage && <Fact label="Stage reached" value={journeyStage} />}
+        {interestLabel && <Fact label="Interest" value={interestLabel} />}
+        {dispoConfidence && <Fact label="Confidence" value={dispoConfidence} />}
+      </dl>
+
+      {/* Was it valuable — qualification */}
+      {qualification && (humanizeToken(qualification.status) || (qualification.criteria?.length ?? 0) > 0) && (
+        <DispoSection
+          label="Qualification"
+          pill={humanizeToken(qualification.status)}
+          subPill={formatConfidence(qualification.confidence)}
+        >
+          {qualification.disqualificationReasons && qualification.disqualificationReasons.length > 0 && (
+            <p className="text-xs text-slate-400">
+              Disqualified: {qualification.disqualificationReasons.join("; ")}
+            </p>
+          )}
+          {qualification.criteria && qualification.criteria.length > 0 && (
+            <ul className="space-y-1.5">
+              {qualification.criteria.map((c, i) => (
+                <li key={`${c.key ?? "criterion"}-${String(i)}`} className="flex items-start justify-between gap-2 text-xs">
+                  <span className="text-slate-300">
+                    {c.label ?? humanizeToken(c.key) ?? "Criterion"}
+                    {c.value ? <span className="text-slate-500"> — {c.value}</span> : null}
+                  </span>
+                  <span className="shrink-0 text-slate-500">{humanizeToken(c.status) ?? "—"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DispoSection>
+      )}
+
+      {/* Was it valuable — conversion */}
+      {conversion && (humanizeToken(conversion.status) || humanizeToken(conversion.conversionType)) && (
+        <DispoSection
+          label="Conversion"
+          pill={humanizeToken(conversion.status)}
+          subPill={
+            conversion.conversionType && conversion.conversionType !== "none"
+              ? humanizeToken(conversion.conversionType)
+              : null
+          }
+        >
+          <Snippets items={conversion.evidence} />
+          {conversion.followUp?.required && (
+            <p className="text-xs text-slate-400">
+              Follow-up: {humanizeToken(conversion.followUp.type) ?? "required"}
+              {conversion.followUp.dueDateOrTimeMentioned ? ` · ${conversion.followUp.dueDateOrTimeMentioned}` : ""}
+              {conversion.followUp.ownerMentioned ? ` · ${conversion.followUp.ownerMentioned}` : ""}
+            </p>
+          )}
+        </DispoSection>
+      )}
+
+      {/* Was it risky — fraud */}
+      {fraud && (humanizeToken(fraud.riskLevel) || (fraud.indicators?.length ?? 0) > 0) && (
+        <DispoSection
+          label="Fraud risk"
+          pill={humanizeToken(fraud.riskLevel)}
+          pillTone={fraudTone(fraud.riskLevel)}
+          subPill={formatConfidence(fraud.confidence)}
+        >
+          {fraud.categories && fraud.categories.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {fraud.categories.map((cat, i) => (
+                <span
+                  key={`${cat}-${String(i)}`}
+                  className="rounded-md border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-300"
+                >
+                  {humanizeToken(cat)}
+                </span>
+              ))}
+            </div>
+          )}
+          {fraud.indicators && fraud.indicators.length > 0 && (
+            <ul className="space-y-2">
+              {fraud.indicators.map((ind, i) => (
+                <li key={`${ind.type ?? "indicator"}-${String(i)}`} className="space-y-1">
+                  <p className="text-xs font-medium text-slate-200">
+                    {humanizeToken(ind.type) ?? "Indicator"}
+                    {ind.severity ? <span className="text-slate-500"> · {ind.severity}</span> : null}
+                  </p>
+                  {ind.description && <p className="text-xs text-slate-400">{ind.description}</p>}
+                  <Snippets items={ind.evidence} />
+                </li>
+              ))}
+            </ul>
+          )}
+          {fraud.recommendedAction && fraud.recommendedAction !== "none" && (
+            <p className="text-xs text-amber-200">Recommended: {humanizeToken(fraud.recommendedAction)}</p>
+          )}
+        </DispoSection>
+      )}
+
+      {/* Was it risky — lead quality (advisory) */}
+      {leadQuality && humanizeToken(leadQuality.status) && (
+        <DispoSection label="Lead quality" pill={humanizeToken(leadQuality.status)}>
+          <p className="text-xs text-slate-400">
+            {[
+              leadQuality.billableRecommendation ? `Billing: ${humanizeToken(leadQuality.billableRecommendation)}` : null,
+              leadQuality.payoutRecommendation ? `Payout: ${humanizeToken(leadQuality.payoutRecommendation)}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "Advisory only — not wired to billing."}
+          </p>
+          {leadQuality.reasons && leadQuality.reasons.length > 0 && (
+            <ul className="space-y-1.5">
+              {leadQuality.reasons.map((r, i) => (
+                <li key={`${r.type ?? "reason"}-${String(i)}`} className="text-xs text-slate-300">
+                  {humanizeToken(r.type) ?? "Reason"}
+                  {r.summary ? <span className="text-slate-500"> — {r.summary}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </DispoSection>
+      )}
+
+      <p className="text-[10px] text-slate-600">
+        AI-generated, evidence-based. Lead-quality and fraud recommendations are advisory and require human review.
+      </p>
+    </div>
+  );
+}
+
+function DispoSection({
+  label,
+  pill,
+  subPill,
+  pillTone = "neutral",
+  children,
+}: {
+  label: string;
+  pill?: string | null;
+  subPill?: string | null;
+  pillTone?: "neutral" | "amber" | "rose" | "emerald";
+  children?: React.ReactNode;
+}) {
+  const toneStyles: Record<"neutral" | "amber" | "rose" | "emerald", string> = {
+    neutral: "border-slate-700 bg-slate-900 text-slate-200",
+    amber: "border-amber-700/60 bg-amber-950/40 text-amber-200",
+    rose: "border-rose-700/60 bg-rose-950/40 text-rose-200",
+    emerald: "border-emerald-800/60 bg-emerald-950/40 text-emerald-200",
+  };
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+        <div className="flex items-center gap-1.5">
+          {pill && (
+            <span className={`rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${toneStyles[pillTone]}`}>
+              {pill}
+            </span>
+          )}
+          {subPill && <span className="text-[11px] text-slate-500">{subPill}</span>}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Snippets({ items }: { items?: string[] }) {
+  const quotes = (items ?? []).filter((s) => s.trim().length > 0);
+  if (quotes.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="space-y-1">
+      {quotes.map((q, i) => (
+        <li key={String(i)} className="border-l-2 border-slate-700 pl-2 text-xs italic text-slate-400">
+          “{q}”
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function fraudTone(riskLevel: string | undefined): "neutral" | "amber" | "rose" | "emerald" {
+  const normalized = (riskLevel ?? "").trim().toLowerCase();
+  if (normalized === "critical" || normalized === "high") {
+    return "rose";
+  }
+  if (normalized === "medium") {
+    return "amber";
+  }
+  if (normalized === "none") {
+    return "emerald";
+  }
+  return "neutral";
 }
 
 function FlagsTab({

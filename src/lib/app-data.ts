@@ -32,6 +32,11 @@ export interface CallFilters {
   dateTo?: string;
   flaggedOnly?: boolean;
   flagCategory?: string;
+  // Disposition-intelligence filters (denormalized `calls.ai_*` columns).
+  finalDisposition?: string;
+  conversionStatus?: string;
+  fraudRisk?: string;
+  leadQuality?: string;
   sortBy?: CallSortBy;
   sortDirection?: CallSortDirection;
 }
@@ -151,7 +156,64 @@ export interface CallFilterOptions {
   publishers: Array<{ id: string; name: string }>;
   campaigns: Array<{ id: string; name: string }>;
   dispositions: string[];
+  finalDispositions: string[];
+  conversionStatuses: string[];
+  fraudRisks: string[];
+  leadQualities: string[];
 }
+
+// Fixed option lists for the disposition-intelligence filters. These mirror the
+// enums in src/server/analyze-call.ts (which must not be imported here — it pulls
+// in the OpenAI SDK). Kept in sync deliberately; a curated subset is fine since
+// these are filter affordances, not validation.
+export const FINAL_DISPOSITION_FILTER_OPTIONS = [
+  "converted",
+  "qualified_no_conversion",
+  "interested_unqualified",
+  "not_interested",
+  "unqualified",
+  "callback_scheduled",
+  "callback_requested",
+  "appointment_scheduled",
+  "transferred",
+  "application_started",
+  "application_submitted",
+  "enrollment_processed",
+  "sale_completed",
+  "support_resolved",
+  "support_unresolved",
+  "complaint_or_escalation",
+  "voicemail",
+  "hangup",
+  "wrong_number",
+  "dead_air",
+  "no_contact",
+  "test_or_duplicate",
+  "suspected_fraud",
+  "unclear",
+] as const;
+export const CONVERSION_STATUS_FILTER_OPTIONS = [
+  "none",
+  "attempted",
+  "callback_requested",
+  "callback_scheduled",
+  "appointment_scheduled",
+  "transfer_completed",
+  "application_started",
+  "application_submitted",
+  "sale_completed",
+  "enrollment_processed",
+  "unclear",
+] as const;
+export const FRAUD_RISK_FILTER_OPTIONS = ["none", "low", "medium", "high", "critical", "unclear"] as const;
+export const LEAD_QUALITY_FILTER_OPTIONS = [
+  "high_quality",
+  "acceptable",
+  "low_quality",
+  "invalid",
+  "suspected_fraud",
+  "unclear",
+] as const;
 
 export interface CallsPageData {
   rows: CallListItem[];
@@ -836,7 +898,22 @@ export function formatDuration(seconds: number) {
 }
 
 const DEFAULT_CALL_FILTERS: Required<
-  Pick<CallFilters, "search" | "publisherId" | "campaignId" | "disposition" | "dateFrom" | "dateTo" | "flagCategory" | "sortBy" | "sortDirection">
+  Pick<
+    CallFilters,
+    | "search"
+    | "publisherId"
+    | "campaignId"
+    | "disposition"
+    | "dateFrom"
+    | "dateTo"
+    | "flagCategory"
+    | "finalDisposition"
+    | "conversionStatus"
+    | "fraudRisk"
+    | "leadQuality"
+    | "sortBy"
+    | "sortDirection"
+  >
 > &
   Pick<CallFilters, "reviewStatus" | "flaggedOnly"> = {
   search: "",
@@ -848,6 +925,10 @@ const DEFAULT_CALL_FILTERS: Required<
   dateTo: "",
   flaggedOnly: false,
   flagCategory: "",
+  finalDisposition: "",
+  conversionStatus: "",
+  fraudRisk: "",
+  leadQuality: "",
   sortBy: "startedAt",
   sortDirection: "desc",
 };
@@ -894,6 +975,10 @@ export function normalizeCallFilters(filters: CallFilters): CallFilters {
     dateTo: asString(filters.dateTo).trim(),
     flaggedOnly: normalizeBoolean(filters.flaggedOnly),
     flagCategory: asString(filters.flagCategory).trim(),
+    finalDisposition: asString(filters.finalDisposition).trim(),
+    conversionStatus: asString(filters.conversionStatus).trim(),
+    fraudRisk: asString(filters.fraudRisk).trim(),
+    leadQuality: asString(filters.leadQuality).trim(),
     sortBy: filters.sortBy ?? DEFAULT_CALL_FILTERS.sortBy,
     sortDirection: filters.sortDirection ?? DEFAULT_CALL_FILTERS.sortDirection,
   };
@@ -910,6 +995,10 @@ export function buildCallFilters(searchParams: URLSearchParams): CallFilters {
     dateTo: searchParams.get("dateTo") ?? "",
     flaggedOnly: searchParams.get("flaggedOnly") === "true",
     flagCategory: searchParams.get("flagCategory") ?? "",
+    finalDisposition: searchParams.get("finalDisposition") ?? "",
+    conversionStatus: searchParams.get("conversionStatus") ?? "",
+    fraudRisk: searchParams.get("fraudRisk") ?? "",
+    leadQuality: searchParams.get("leadQuality") ?? "",
     sortBy: toCallSortBy(searchParams.get("sortBy")),
     sortDirection: toCallSortDirection(searchParams.get("sortDirection")),
   });
@@ -953,6 +1042,22 @@ export function filtersToSearchParams(filters: CallFilters) {
 
   if (normalized.flagCategory) {
     params.set("flagCategory", normalized.flagCategory);
+  }
+
+  if (normalized.finalDisposition) {
+    params.set("finalDisposition", normalized.finalDisposition);
+  }
+
+  if (normalized.conversionStatus) {
+    params.set("conversionStatus", normalized.conversionStatus);
+  }
+
+  if (normalized.fraudRisk) {
+    params.set("fraudRisk", normalized.fraudRisk);
+  }
+
+  if (normalized.leadQuality) {
+    params.set("leadQuality", normalized.leadQuality);
   }
 
   if (normalized.sortBy && normalized.sortBy !== DEFAULT_CALL_FILTERS.sortBy) {
@@ -1443,6 +1548,10 @@ export async function getCallFilterOptions(client: SupabaseAny, organizationId: 
       name: asString(row.name),
     })),
     dispositions: Array.from(dispositionSet).sort(),
+    finalDispositions: [...FINAL_DISPOSITION_FILTER_OPTIONS],
+    conversionStatuses: [...CONVERSION_STATUS_FILTER_OPTIONS],
+    fraudRisks: [...FRAUD_RISK_FILTER_OPTIONS],
+    leadQualities: [...LEAD_QUALITY_FILTER_OPTIONS],
   };
 }
 
@@ -1485,6 +1594,22 @@ export async function getCallsPageData(client: SupabaseAny, organizationId: stri
 
   if (normalizedFilters.disposition) {
     query = query.eq("current_disposition", normalizedFilters.disposition);
+  }
+
+  if (normalizedFilters.finalDisposition) {
+    query = query.eq("ai_final_disposition", normalizedFilters.finalDisposition);
+  }
+
+  if (normalizedFilters.conversionStatus) {
+    query = query.eq("ai_conversion_status", normalizedFilters.conversionStatus);
+  }
+
+  if (normalizedFilters.fraudRisk) {
+    query = query.eq("ai_fraud_risk", normalizedFilters.fraudRisk);
+  }
+
+  if (normalizedFilters.leadQuality) {
+    query = query.eq("ai_lead_quality", normalizedFilters.leadQuality);
   }
 
   if (normalizedFilters.dateFrom) {
@@ -2810,12 +2935,16 @@ export async function getReportsSummary(client: SupabaseAny, organizationId: str
   ] = await Promise.all([
     client
       .from("calls")
-      .select("id, publisher_id, current_disposition, flag_count")
+      .select(
+        "id, publisher_id, current_disposition, flag_count, ai_conversion_status, ai_fraud_risk, ai_qualification_status"
+      )
       .eq("organization_id", organizationId)
       .gte("started_at", monthStart),
     client
       .from("calls")
-      .select("id, publisher_id, current_disposition, flag_count")
+      .select(
+        "id, publisher_id, current_disposition, flag_count, ai_conversion_status, ai_fraud_risk, ai_qualification_status"
+      )
       .eq("organization_id", organizationId)
       .gte("started_at", previousMonthStart)
       .lt("started_at", monthStart),
@@ -2908,6 +3037,41 @@ export async function getReportsSummary(client: SupabaseAny, organizationId: str
   const importRejectionRate = currentImportTotal === 0 ? 0 : (currentImportRejected / currentImportTotal) * 100;
   const previousImportRejectionRate = previousImportTotal === 0 ? 0 : (previousImportRejected / previousImportTotal) * 100;
 
+  // Disposition-intelligence metrics (migration 0019 denormalized columns).
+  // Rates use the ANALYZED count (calls with a v3 analysis) as the denominator
+  // so forward-only rollout doesn't dilute them with un-analyzed calls.
+  const CONVERTED_STATUSES = new Set([
+    "sale_completed",
+    "enrollment_processed",
+    "application_submitted",
+    "appointment_scheduled",
+    "transfer_completed",
+  ]);
+  const countConverted = (rows: Array<Record<string, unknown>>) =>
+    rows.filter((row) => CONVERTED_STATUSES.has(asString(row.ai_conversion_status))).length;
+  const countAnalyzedConversion = (rows: Array<Record<string, unknown>>) =>
+    rows.filter((row) => asString(row.ai_conversion_status).length > 0).length;
+  const countHighFraud = (rows: Array<Record<string, unknown>>) => {
+    const high = new Set(["high", "critical"]);
+    return rows.filter((row) => high.has(asString(row.ai_fraud_risk))).length;
+  };
+  const countAnalyzedFraud = (rows: Array<Record<string, unknown>>) =>
+    rows.filter((row) => asString(row.ai_fraud_risk).length > 0).length;
+
+  const currentAnalyzedConversion = countAnalyzedConversion(currentCalls);
+  const previousAnalyzedConversion = countAnalyzedConversion(previousCalls);
+  const currentConverted = countConverted(currentCalls);
+  const previousConverted = countConverted(previousCalls);
+  const currentConversionRate = currentAnalyzedConversion === 0 ? 0 : (currentConverted / currentAnalyzedConversion) * 100;
+  const previousConversionRate = previousAnalyzedConversion === 0 ? 0 : (previousConverted / previousAnalyzedConversion) * 100;
+
+  const currentAnalyzedFraud = countAnalyzedFraud(currentCalls);
+  const previousAnalyzedFraud = countAnalyzedFraud(previousCalls);
+  const currentHighFraud = countHighFraud(currentCalls);
+  const previousHighFraud = countHighFraud(previousCalls);
+  const currentFraudRate = currentAnalyzedFraud === 0 ? 0 : (currentHighFraud / currentAnalyzedFraud) * 100;
+  const previousFraudRate = previousAnalyzedFraud === 0 ? 0 : (previousHighFraud / previousAnalyzedFraud) * 100;
+
   const publisherMetrics = new Map<string, { totalCalls: number; flaggedCalls: number }>();
   for (const row of currentCalls) {
     const publisherId = asNullableString(row.publisher_id) ?? "unassigned";
@@ -2933,6 +3097,26 @@ export async function getReportsSummary(client: SupabaseAny, organizationId: str
       value: formatPercent(currentQualifiedRate),
       trend: formatTrend(currentQualifiedRate, previousQualifiedRate, "month"),
       description: "Share of calls with a disposition that looks qualified or sale-adjacent.",
+    },
+    {
+      id: "ai-conversion-rate",
+      title: "AI Conversion Rate",
+      value: formatPercent(currentConversionRate),
+      trend:
+        currentAnalyzedConversion === 0
+          ? "No AI-analyzed calls yet this month"
+          : formatTrend(currentConversionRate, previousConversionRate, "month"),
+      description: "Share of AI-analyzed calls that reached a sale, enrollment, submitted application, appointment, or transfer.",
+    },
+    {
+      id: "ai-fraud-rate",
+      title: "AI Fraud Risk",
+      value: formatPercent(currentFraudRate),
+      trend:
+        currentAnalyzedFraud === 0
+          ? "No AI-analyzed calls yet this month"
+          : `${currentHighFraud.toLocaleString()} high/critical of ${currentAnalyzedFraud.toLocaleString()} analyzed`,
+      description: "Share of AI-analyzed calls flagged high or critical fraud risk by the model.",
     },
     {
       id: "flag-rate",

@@ -716,6 +716,16 @@ export type Database = {
       }
       calls: {
         Row: {
+          ai_analysis_version: string | null
+          ai_billable_recommendation: string | null
+          ai_conversion_status: string | null
+          ai_conversion_type: string | null
+          ai_final_disposition: string | null
+          ai_fraud_likely: boolean | null
+          ai_fraud_risk: string | null
+          ai_journey_stage: string | null
+          ai_lead_quality: string | null
+          ai_qualification_status: string | null
           analysis_completed_at: string | null
           analysis_error: string | null
           analysis_started_at: string | null
@@ -750,6 +760,16 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_analysis_version?: string | null
+          ai_billable_recommendation?: string | null
+          ai_conversion_status?: string | null
+          ai_conversion_type?: string | null
+          ai_final_disposition?: string | null
+          ai_fraud_likely?: boolean | null
+          ai_fraud_risk?: string | null
+          ai_journey_stage?: string | null
+          ai_lead_quality?: string | null
+          ai_qualification_status?: string | null
           analysis_completed_at?: string | null
           analysis_error?: string | null
           analysis_started_at?: string | null
@@ -784,6 +804,16 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_analysis_version?: string | null
+          ai_billable_recommendation?: string | null
+          ai_conversion_status?: string | null
+          ai_conversion_type?: string | null
+          ai_final_disposition?: string | null
+          ai_fraud_likely?: boolean | null
+          ai_fraud_risk?: string | null
+          ai_journey_stage?: string | null
+          ai_lead_quality?: string | null
+          ai_qualification_status?: string | null
           analysis_completed_at?: string | null
           analysis_error?: string | null
           analysis_started_at?: string | null

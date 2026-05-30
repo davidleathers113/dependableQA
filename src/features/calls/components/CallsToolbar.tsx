@@ -5,6 +5,7 @@ import {
   type CallTableDensity,
 } from "../../../lib/app-data";
 import { CALLS_TABLE_COLUMNS, type CallsTableColumnKey } from "./CallsTable";
+import { humanizeToken } from "../../call-review/analysisInsights";
 
 interface Props {
   filters: CallFilters;
@@ -22,6 +23,10 @@ function formatFilterChipLabel(key: string, value: string) {
   if (key === "publisherId") return `Publisher: ${value}`;
   if (key === "campaignId") return `Campaign: ${value}`;
   if (key === "disposition") return `Disposition: ${value}`;
+  if (key === "finalDisposition") return `Outcome: ${humanizeToken(value) ?? value}`;
+  if (key === "conversionStatus") return `Conversion: ${humanizeToken(value) ?? value}`;
+  if (key === "fraudRisk") return `Fraud: ${humanizeToken(value) ?? value}`;
+  if (key === "leadQuality") return `Lead: ${humanizeToken(value) ?? value}`;
   if (key === "dateFrom") return `From: ${value}`;
   if (key === "dateTo") return `To: ${value}`;
   if (key === "flagCategory") return `Flag type: ${value}`;
@@ -205,6 +210,66 @@ export function CallsToolbar({
                   {options.dispositions.map((disposition) => (
                     <option key={disposition} value={disposition}>
                       {disposition}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">AI Outcome</span>
+                <select
+                  value={filters.finalDisposition ?? ""}
+                  onChange={(event) => update("finalDisposition", event.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  <option value="">All AI outcomes</option>
+                  {options.finalDispositions.map((value) => (
+                    <option key={value} value={value}>
+                      {humanizeToken(value) ?? value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Conversion</span>
+                <select
+                  value={filters.conversionStatus ?? ""}
+                  onChange={(event) => update("conversionStatus", event.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  <option value="">All conversions</option>
+                  {options.conversionStatuses.map((value) => (
+                    <option key={value} value={value}>
+                      {humanizeToken(value) ?? value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Fraud Risk</span>
+                <select
+                  value={filters.fraudRisk ?? ""}
+                  onChange={(event) => update("fraudRisk", event.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  <option value="">All fraud levels</option>
+                  {options.fraudRisks.map((value) => (
+                    <option key={value} value={value}>
+                      {humanizeToken(value) ?? value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Lead Quality</span>
+                <select
+                  value={filters.leadQuality ?? ""}
+                  onChange={(event) => update("leadQuality", event.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  <option value="">All lead qualities</option>
+                  {options.leadQualities.map((value) => (
+                    <option key={value} value={value}>
+                      {humanizeToken(value) ?? value}
                     </option>
                   ))}
                 </select>
