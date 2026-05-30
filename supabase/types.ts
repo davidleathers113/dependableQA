@@ -1593,6 +1593,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_call_processing_debit: {
+        Args: {
+          p_amount_cents: number
+          p_billing_account_id: string
+          p_call_id: string
+          p_organization_id: string
+        }
+        Returns: boolean
+      }
       apply_stripe_recharge_event: {
         Args: {
           p_amount_cents: number

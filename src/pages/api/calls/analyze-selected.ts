@@ -6,6 +6,7 @@ import { getAdminSupabase } from "../../../lib/supabase/admin-client";
 import {
   analyzeSelectedInputSchema,
   enqueueAnalysisForCalls,
+  InsufficientBalanceError,
 } from "../../../server/analyze-selection";
 
 export const prerender = false;
@@ -52,6 +53,12 @@ export const POST: APIRoute = async (context) => {
 
     return json({ ok: true, ...result });
   } catch (error) {
+    if (error instanceof InsufficientBalanceError) {
+      return json(
+        { error: error.message, requiredCents: error.requiredCents, availableCents: error.availableCents },
+        402
+      );
+    }
     return json(
       { error: error instanceof Error ? error.message : "Unable to queue analysis." },
       400

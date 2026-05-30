@@ -2,10 +2,28 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "../../supabase/types";
 import { insertAuditLog } from "../lib/app-data";
+import { estimateCallProcessingCents, loadBillingContext, loadWalletBalanceCents } from "./ai-pricing";
 import { enqueueAiJob } from "./ai-jobs";
 import { RINGBA_MANUAL_IMPORT_MAX_RECORDS } from "./ringba-calllogs";
 
 type SupabaseAny = SupabaseClient<Database>;
+
+/**
+ * Thrown by the AI-spend gate when the estimated cost of the work exceeds the
+ * org's available wallet balance. The route maps this to HTTP 402.
+ */
+export class InsufficientBalanceError extends Error {
+  readonly requiredCents: number;
+  readonly availableCents: number;
+  constructor(requiredCents: number, availableCents: number) {
+    super(
+      `Insufficient wallet balance for AI processing: this request needs about ${requiredCents}¢ but only ${availableCents}¢ is available. Add funds and try again.`
+    );
+    this.name = "InsufficientBalanceError";
+    this.requiredCents = requiredCents;
+    this.availableCents = availableCents;
+  }
+}
 
 /** Hard cap on how many calls one analyze-selected request may queue. */
 export const ANALYZE_SELECTED_MAX_BATCH = RINGBA_MANUAL_IMPORT_MAX_RECORDS;
@@ -85,7 +103,7 @@ export async function enqueueAnalysisForCalls(
 
   const callRows = await client
     .from("calls")
-    .select("id, recording_url, transcription_status")
+    .select("id, recording_url, transcription_status, duration_seconds")
     .eq("organization_id", options.organizationId)
     .in("id", requestedIds);
 
@@ -93,12 +111,38 @@ export async function enqueueAnalysisForCalls(
     throw new Error(callRows.error.message);
   }
 
-  const found = new Map<string, { recordingUrl: string | null; transcriptionStatus: string }>();
+  const found = new Map<
+    string,
+    { recordingUrl: string | null; transcriptionStatus: string; durationSeconds: number }
+  >();
   for (const row of callRows.data ?? []) {
     found.set(String(row.id), {
       recordingUrl: (row.recording_url as string | null) ?? null,
       transcriptionStatus: String(row.transcription_status ?? "pending"),
+      durationSeconds: typeof row.duration_seconds === "number" ? row.duration_seconds : 0,
     });
+  }
+
+  // Wallet gate: block up front if the calls we'd actually transcribe would cost
+  // more than the available balance. Only transcription is billed (per the
+  // existing per-minute model); analysis-only re-runs add no charge. When no
+  // billing account is configured we can't meter, so we don't block.
+  const billing = await loadBillingContext(client, options.organizationId);
+  if (billing) {
+    let estimateCents = 0;
+    for (const callId of requestedIds) {
+      const call = found.get(callId);
+      if (!call || call.transcriptionStatus === "completed" || !call.recordingUrl) {
+        continue;
+      }
+      estimateCents += estimateCallProcessingCents(call.durationSeconds, billing.perMinuteRateCents);
+    }
+    if (estimateCents > 0) {
+      const balance = await loadWalletBalanceCents(client, options.organizationId);
+      if (estimateCents > balance) {
+        throw new InsufficientBalanceError(estimateCents, balance);
+      }
+    }
   }
 
   const skipped: AnalyzeSelectionResult["skipped"] = [];

@@ -3,6 +3,7 @@ import type { Database, Json } from "../../supabase/types";
 import { insertAuditLog } from "../lib/app-data";
 import { getOpenAiServerConfig } from "../lib/openai/server-client";
 import { analyzeCall } from "./analyze-call";
+import { debitCallProcessing } from "./ai-pricing";
 import { transcribeCall } from "./transcribe-call";
 
 type SupabaseAny = SupabaseClient<Database>;
@@ -660,11 +661,23 @@ export async function runAiJobs(
 
     try {
       if (runningJob.job_type === "transcription") {
-        await handlers.transcription(client, {
+        const transcription = await handlers.transcription(client, {
           organizationId: runningJob.organization_id,
           callId: runningJob.call_id,
           language: asString(payload.language),
         });
+        // Meter the wallet for this processed call. Best-effort + idempotent: a
+        // billing hiccup must never fail a completed transcript or be re-charged
+        // on a retry.
+        try {
+          await debitCallProcessing(client, {
+            organizationId: runningJob.organization_id,
+            callId: runningJob.call_id,
+            durationSeconds: transcription?.durationSeconds ?? 0,
+          });
+        } catch {
+          // Swallow — reconciled out-of-band; never blocks job completion.
+        }
         await enqueueAiJob(client, {
           organizationId: runningJob.organization_id,
           callId: runningJob.call_id,

@@ -250,6 +250,17 @@ function createClient(initialJobs: JobRow[] = []) {
           };
         }
 
+        if (table === "billing_accounts") {
+          // No billing account in these fixtures → wallet metering is skipped.
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+            }),
+          };
+        }
+
         throw new Error(`Unexpected table: ${table}`);
       },
     },

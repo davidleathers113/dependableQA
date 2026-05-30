@@ -34,6 +34,9 @@ Current migrations:
 | `0011_organization_onboarding.sql` | Drops the permissive `organizations` insert policy; adds `create_organization_with_owner(name)` transactional onboarding RPC |
 | `0012_fk_covering_indexes.sql` | Covering indexes for 24 previously-unindexed foreign keys |
 | `0013_function_security_hardening.sql` | Pins `search_path` on `set_updated_at` / `sync_call_flag_summary` / `apply_stripe_recharge_event`; tightens EXECUTE grants on `handle_new_user` / `is_org_member` / `has_org_role` |
+| `0014_ringba_ingest_key_hash.sql` | `integrations.public_ingest_key_hash` (generated, SHA-256) + unique partial index for indexed Ringba pixel lookup |
+| `0015_ringba_import_batches.sql` | `ringba_import_batches` (manual full-API import tracking) with CHECK-constrained status/behavior + member-read / owner-admin-manage RLS |
+| `0016_ai_spend_metering.sql` | `apply_call_processing_debit` RPC (transactional, no-negative, service-role-only) + unique partial index for one `call_processing` debit per (org, call) |
 
 ## The three layers
 
@@ -73,7 +76,9 @@ Stripe events are deduped by `processed_stripe_events` (PK on `stripe_event_id`)
 
 ## Wallet ledger invariant
 
-The wallet balance is **derived** — it is the `balance_after_cents` of the most recent `wallet_ledger_entries` row for an organization, not a stored column. To keep that derivation race-free, **any code that inserts a `wallet_ledger_entries` row must first lock the corresponding `billing_accounts` row with `SELECT … FOR UPDATE`** (as `apply_stripe_recharge_event` does — see `0009_stripe_event_idempotency.sql`). A future debit/adjustment/refund writer that skips this lock would reintroduce a lost-update race on the balance. If write volume grows, prefer promoting the balance to a locked column on `billing_accounts` over inferring it from the latest ledger row.
+The wallet balance is **derived** — it is the `balance_after_cents` of the most recent `wallet_ledger_entries` row for an organization, not a stored column. To keep that derivation race-free, **any code that inserts a `wallet_ledger_entries` row must first lock the corresponding `billing_accounts` row with `SELECT … FOR UPDATE`** (as `apply_stripe_recharge_event` and `apply_call_processing_debit` both do). A future debit/adjustment/refund writer that skips this lock would reintroduce a lost-update race on the balance.
+
+**AI spend metering (`0016`).** Processing a call debits the wallet via `apply_call_processing_debit` — billed at `billing_accounts.per_minute_rate_cents` × billable minutes (rounded up, min 1). It is idempotent (one `call_processing` debit per `(organization_id, reference_id=call_id)`, enforced by a unique partial index) and **never drives the balance negative** (it deducts at most the available balance). The enqueue gate (`enqueueAnalysisForCalls`) estimates the batch's transcription cost and refuses up front (HTTP 402) when it would exceed the balance; the debit settles actual usage when a transcription job completes. Orgs without a `billing_accounts` row are not metered (and not blocked). If write volume grows, prefer promoting the balance to a locked column on `billing_accounts` over inferring it from the latest ledger row.
 
 ## Triggers
 

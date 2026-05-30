@@ -17,6 +17,7 @@ vi.mock("../../src/server/analyze-selection", async () => {
 });
 
 import { POST } from "../../src/pages/api/calls/analyze-selected";
+import { InsufficientBalanceError } from "../../src/server/analyze-selection";
 
 function ctx(body: unknown): APIContext {
   return {
@@ -104,6 +105,20 @@ describe("POST /api/calls/analyze-selected", () => {
         actorUserId: "user_1",
       })
     );
+  });
+
+  it("returns 402 when the wallet balance is insufficient", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    enqueueAnalysisForCalls.mockRejectedValue(new InsufficientBalanceError(100, 50));
+
+    const response = await POST(ctx({ callIds: ["c1"] }));
+    expect(response.status).toBe(402);
+    const body = (await response.json()) as { error?: string; requiredCents?: number; availableCents?: number };
+    expect(body.requiredCents).toBe(100);
+    expect(body.availableCents).toBe(50);
   });
 
   it("surfaces a 400 when the gate rejects (e.g. cap exceeded)", async () => {

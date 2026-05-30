@@ -14,6 +14,7 @@ interface CallRow {
   id: string;
   recording_url: string | null;
   transcription_status: string;
+  duration_seconds?: number;
 }
 
 interface BatchRow {
@@ -21,8 +22,18 @@ interface BatchRow {
   organizationId: string;
 }
 
+interface BillingRow {
+  id: string;
+  per_minute_rate_cents: number;
+}
+
 /** Fake client: calls.select().eq("organization_id").in("id", ids) resolves to org-scoped rows. */
-function fakeClient(rows: CallRow[], batches: BatchRow[] = []) {
+function fakeClient(
+  rows: CallRow[],
+  batches: BatchRow[] = [],
+  billing: BillingRow | null = null,
+  balanceCents = 0
+) {
   return {
     from(table: string) {
       if (table === "calls") {
@@ -45,6 +56,28 @@ function fakeClient(rows: CallRow[], batches: BatchRow[] = []) {
                 maybeSingle: async () => ({
                   data: batches.find((b) => b.id === id && b.organizationId === org) ?? null,
                   error: null,
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === "billing_accounts") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: billing, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === "wallet_ledger_entries") {
+        return {
+          select: () => ({
+            eq: () => ({
+              order: () => ({
+                limit: () => ({
+                  maybeSingle: async () => ({ data: { balance_after_cents: balanceCents }, error: null }),
                 }),
               }),
             }),
@@ -207,5 +240,56 @@ describe("enqueueAnalysisForCalls", () => {
       })
     ).rejects.toThrow("Import batch not found.");
     expect(mocks.enqueueAiJob).not.toHaveBeenCalled();
+  });
+
+  it("blocks (InsufficientBalanceError) when estimated transcription cost exceeds the balance", async () => {
+    // 1 call, 60s -> 1 billable minute at 100c = 100c estimate; balance only 50c.
+    const client = fakeClient(
+      [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending", duration_seconds: 60 }],
+      [],
+      { id: "ba_1", per_minute_rate_cents: 100 },
+      50
+    );
+
+    await expect(
+      enqueueAnalysisForCalls(client as never, {
+        organizationId: "org_1",
+        callIds: ["call_1"],
+        actorUserId: "user_1",
+      })
+    ).rejects.toMatchObject({ name: "InsufficientBalanceError", requiredCents: 100, availableCents: 50 });
+    expect(mocks.enqueueAiJob).not.toHaveBeenCalled();
+  });
+
+  it("queues when the wallet balance covers the estimate", async () => {
+    const client = fakeClient(
+      [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending", duration_seconds: 60 }],
+      [],
+      { id: "ba_1", per_minute_rate_cents: 100 },
+      1000
+    );
+
+    const result = await enqueueAnalysisForCalls(client as never, {
+      organizationId: "org_1",
+      callIds: ["call_1"],
+      actorUserId: "user_1",
+    });
+
+    expect(result.transcriptionQueued).toBe(1);
+    expect(mocks.enqueueAiJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not block when no billing account is configured (can't meter)", async () => {
+    const client = fakeClient([
+      { id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending", duration_seconds: 600 },
+    ]); // billing = null
+
+    const result = await enqueueAnalysisForCalls(client as never, {
+      organizationId: "org_1",
+      callIds: ["call_1"],
+      actorUserId: "user_1",
+    });
+
+    expect(result.transcriptionQueued).toBe(1);
   });
 });
