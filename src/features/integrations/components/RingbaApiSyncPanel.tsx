@@ -58,6 +58,17 @@ export function RingbaApiSyncPanel({
   const [lookback, setLookback] = React.useState(rb.lookbackHours);
   const [minDuration, setMinDuration] = React.useState(rb.minimumDurationSeconds);
   const [validationMessage, setValidationMessage] = React.useState("");
+  // Hide a stale "Connection successful/failed" notice once the user edits a
+  // tested field (account id / token / timezone), so the result can't be
+  // mistaken for a test of the new values.
+  const [editedSinceTest, setEditedSinceTest] = React.useState(false);
+
+  // A new test result clears the edited flag so the fresh notice shows.
+  React.useEffect(() => {
+    if (testNotice) {
+      setEditedSinceTest(false);
+    }
+  }, [testNotice]);
 
   // Runtime-supported IANA zones, plus the current value if it predates the
   // runtime's zone table, so a previously-saved zone stays selectable.
@@ -162,6 +173,13 @@ export function RingbaApiSyncPanel({
         </p>
       </div>
 
+      {!integration.isConfigured ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          Create the Ringba integration first, then enter your Account ID and API token here to save settings and test the
+          connection.
+        </div>
+      ) : null}
+
       <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
         <input
           type="checkbox"
@@ -178,7 +196,10 @@ export function RingbaApiSyncPanel({
           <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Ringba account id</span>
           <input
             value={accountId}
-            onChange={(e) => setAccountId(e.target.value)}
+            onChange={(e) => {
+              setAccountId(e.target.value);
+              setEditedSinceTest(true);
+            }}
             placeholder="RA…"
             autoComplete="off"
             disabled={disabled}
@@ -192,7 +213,10 @@ export function RingbaApiSyncPanel({
           <input
             type="password"
             value={apiToken}
-            onChange={(e) => setApiToken(e.target.value)}
+            onChange={(e) => {
+              setApiToken(e.target.value);
+              setEditedSinceTest(true);
+            }}
             autoComplete="new-password"
             disabled={disabled}
             className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
@@ -210,7 +234,10 @@ export function RingbaApiSyncPanel({
           </span>
           <select
             value={timeZone || DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE}
-            onChange={(e) => setTimeZone(e.target.value)}
+            onChange={(e) => {
+              setTimeZone(e.target.value);
+              setEditedSinceTest(true);
+            }}
             disabled={disabled}
             className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
           >
@@ -323,7 +350,7 @@ export function RingbaApiSyncPanel({
         </button>
       </div>
 
-      {testNotice ? (
+      {testNotice && !editedSinceTest ? (
         <div
           className={`rounded-xl border px-4 py-3 text-sm ${
             testNotice.type === "success"
