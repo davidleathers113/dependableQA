@@ -32,7 +32,7 @@ Existing coverage targets the risk areas: auth/session resolution, Supabase conf
 
 **Ringba full API import (cost control).** The defining guarantee — *importing recordings must not auto-spend on OpenAI* — is pinned by tests: `src/server/integration-ingest.test.ts` asserts a `ringba_api` ingest enqueues **zero** AI jobs by default (and that the `enqueueAiJobs: true` override re-enables it); `src/server/ringba-import.test.ts` proves the hard `maxRecords` cap (2000) is enforced server-side even when a larger value is requested, that ingest is called with `enqueueAiJobs: false`, recording-only vs. all-calls filtering, pagination limits, and that a Ringba HTTP failure records an integration event + marks the batch `failed`; `src/server/analyze-selection.test.ts` proves the gate queues transcription only for calls with a recording and no transcript, analysis only for calls with a transcript, enforces the batch cap, and skips calls outside the org (`not_in_org`); `src/lib/integration-config.test.ts` proves the API token is never present in the public config. Route-level auth/org-scoping/cap behavior lives in `tests/api/ringba-import.test.ts` and `tests/api/calls-analyze-selected.test.ts`, and `tests/api/settings-integrations.test.ts` covers the test-connection action.
 
-> Manual browser QA has been done ad hoc in the past (against local `netlify dev`). There is no automated browser/e2e suite; treat manual passes as point-in-time checks, not regression coverage.
+> Browser flows are covered by an automated Playwright suite — see [Browser e2e](#browser-e2e-reviewer-workflow) below.
 
 ## DB-level tests (`npm run test:db`)
 
@@ -58,11 +58,21 @@ Prerequisites and safety:
 
 ## Browser e2e (reviewer workflow)
 
-Phase 6 verifies the reviewer workflow in a real browser against the **local** Supabase stack (never production), driven via the Playwright MCP. Setup:
+An automated **Playwright** suite (`tests/e2e/`, `playwright.config.ts`) drives the reviewer workflow in a real browser against the **local** Supabase stack — never production. Run it:
 
-1. **Local Supabase + app, wired locally.** `supabase start`, then create a gitignored `.env.development.local` pointing at the local stack (`SUPABASE_URL=http://127.0.0.1:54321` + the local `ANON_KEY`/`SERVICE_ROLE_KEY` from `supabase status -o env`, plus `APP_URL`). In dev mode `astro.config.ts` merges these over `.env` via Vite's `loadEnv`, so the prod `.env` is untouched. Run `npm run dev` (Astro on `:4321`; the reviewer workflow is SSR + `/api/**`, so the Netlify functions aren't needed).
-2. **Prod-safety gate (do this before any browser interaction):** confirm the running app targets `127.0.0.1` — e.g. authenticate the seeded local-only user and confirm no production Supabase host appears in served JS or network traffic. Never run e2e against production.
-3. **Seed:** `npm run e2e:seed` (`tests/e2e/seed.mjs`) — refuses non-local hosts, then truncates and seeds a confirmed reviewer user (email/password), an org + owner membership, and one call with a transcript, an open flag, and a review note (no recording → exercises the graceful fallback). It prints the login creds, ids, and the call-detail URLs (incl. `?t=` / `?flag=` deep links).
-4. **Drive** the flows via the Playwright MCP: login → call list → call detail → recording fallback → transcript-segment seek → transcript search/highlight → flag resolve → note add/delete → `?t=`/`?flag=` deep links → mobile tabs / keyboard shortcuts.
+```bash
+supabase start        # local Postgres + auth on :54321 (one-time per session)
+npm run test:e2e      # node tests/e2e/setup-env.mjs && playwright test
+```
 
-e2e is intentionally **not** part of `npm test` / `ci:verify` (no browser or app server in CI). The Phase 6 run found and fixed two real bugs (see `git log`): the browser Supabase client ran unauthenticated (localStorage vs. the cookie session) and the app-shell nav had an SSR/CSR hydration mismatch — both now covered by unit regression tests (`src/lib/supabase/browser-client.test.ts`, `src/components/app-shell/AppShell.test.tsx`).
+How it works:
+
+- **`setup-env.mjs`** (runs first) derives Supabase creds from the *running* local stack (`supabase status -o env`), **asserts the host is local**, and writes a gitignored `.env.development.local`. In dev mode `astro.config.ts` merges this over `.env` (Vite `loadEnv`), so the prod `.env` is untouched.
+- **`playwright.config.ts`** starts the app fresh (`npm run dev`, `reuseExistingServer: false` so a stray prod-pointed server is never reused) and runs `global-setup.ts`, which seeds via `seed.mjs`.
+- **`seed.mjs`** refuses non-local DB hosts, then seeds an `owner` + a true `reviewer` (the primary login), an org, and a call with transcript, an open flag, and a note (no recording → graceful fallback).
+- **`auth.setup.ts`** logs in as the seeded reviewer and saves `storageState`. This is the prod-safety gate: the reviewer exists **only** locally, so a successful login proves the app is wired to local Supabase — if it were pointed at prod, login fails and no spec runs. Every spec also asserts no request ever hits the production Supabase host.
+- **`reviewer-workflow.spec.ts`** covers: call list → call detail (transcript, flag, note, graceful no-recording fallback) → transcript search → `/` focus shortcut → `?t=`/`?flag=` deep links → resolve flag → add/delete note.
+
+Notes on robustness: the login and note/search inputs are hydrated React (controlled) islands, so the specs type with `pressSequentially` and retry until state commits; the flags/notes rail is rendered twice for responsive layout, so locators are scoped to the visible copy (`.filter({ visible: true })`).
+
+e2e is intentionally **not** part of `npm test` / `ci:verify` (no browser/app server in the `verify` job). It runs in CI via the manually-triggered `e2e` workflow (`.github/workflows/e2e.yml`). The original Phase 6 run found and fixed two real bugs (see `git log`): the browser Supabase client ran unauthenticated (localStorage vs. the cookie session) and the app-shell nav had an SSR/CSR hydration mismatch — both now covered by unit regression tests (`src/lib/supabase/browser-client.test.ts`, `src/components/app-shell/AppShell.test.tsx`).

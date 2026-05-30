@@ -41,6 +41,8 @@ lerna-debug.log*
 playwright-report/
 test-results/
 .playwright-mcp/
+tests/e2e/.auth/
+tests/e2e/.seed.json
 
 # Local databases
 *.sqlite
