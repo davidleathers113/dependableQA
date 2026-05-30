@@ -8,6 +8,8 @@ interface SessionPayload {
 interface Props {
   title: string;
   session: SessionPayload;
+  /** Current request path, provided by the Astro layout (Astro.url.pathname). */
+  currentPath: string;
   children: React.ReactNode;
 }
 
@@ -25,8 +27,11 @@ const secondaryNav = [
   { label: 'Updates', href: '/app/updates', icon: '🔔' },
 ];
 
-export default function AppShell({ title, session, children }: Props) {
-  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+export default function AppShell({ title, session, currentPath, children }: Props) {
+  // currentPath comes from the server (Astro.url.pathname) and is passed as a
+  // prop, so the active-nav class renders identically on the server and during
+  // hydration — avoiding a hydration mismatch. (Previously this read
+  // window.location, which is empty on the server and set on the client.)
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-100 antialiased">
