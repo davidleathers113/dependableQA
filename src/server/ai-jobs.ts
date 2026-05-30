@@ -3,7 +3,7 @@ import type { Database, Json } from "../../supabase/types";
 import { insertAuditLog } from "../lib/app-data";
 import { getOpenAiServerConfig } from "../lib/openai/server-client";
 import { analyzeCall } from "./analyze-call";
-import { debitCallProcessing } from "./ai-pricing";
+import { debitCallProcessing, releaseCallHold } from "./ai-pricing";
 import { transcribeCall } from "./transcribe-call";
 
 type SupabaseAny = SupabaseClient<Database>;
@@ -716,6 +716,20 @@ export async function runAiJobs(
       processed.push(buildJobResult(completedJob));
     } catch (error) {
       const failedJob = await failAiJob(client, runningJob, error);
+      // Terminal transcription failure: release the wallet reservation so the
+      // held funds return to available balance. (A retry keeps the hold; only a
+      // job that will never run again should free it. The expiry sweep is the
+      // backstop.) Best-effort — hold cleanup must never break the job loop.
+      if (runningJob.job_type === "transcription" && failedJob.status === "failed") {
+        try {
+          await releaseCallHold(client, {
+            organizationId: runningJob.organization_id,
+            callId: runningJob.call_id,
+          });
+        } catch {
+          // Swept later if this fails.
+        }
+      }
       processed.push(buildJobResult(failedJob));
     }
   }

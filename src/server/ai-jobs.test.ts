@@ -146,10 +146,20 @@ function createClient(initialJobs: JobRow[] = []) {
     ],
   ]);
 
+  const rpcCalls: Array<{ name: string; args: unknown }> = [];
+
   return {
     jobs,
     calls,
+    rpcCalls,
     client: {
+      async rpc(name: string, args: unknown) {
+        rpcCalls.push({ name, args });
+        if (name === "release_call_processing_hold") return { data: true, error: null };
+        if (name === "reserve_calls_for_processing") return { data: true, error: null };
+        if (name === "sweep_expired_processing_holds") return { data: 0, error: null };
+        return { data: null, error: null };
+      },
       from(table: string) {
         if (table === "ai_jobs") {
           return {
@@ -569,7 +579,7 @@ describe("ai jobs", () => {
       analysisPromptVersion: "v1",
       analysisSchemaVersion: "v1",
     });
-    const { client, jobs, calls } = createClient([
+    const { client, jobs, calls, rpcCalls } = createClient([
       {
         id: "job_1",
         organization_id: "org_1",
@@ -621,5 +631,57 @@ describe("ai jobs", () => {
       transcription_status: "failed",
       transcription_error: "Recording exceeds the 25 MB transcription limit.",
     });
+    // Terminal transcription failure releases the wallet reservation.
+    expect(rpcCalls.some((c) => c.name === "release_call_processing_hold")).toBe(true);
+  });
+
+  it("does NOT release the reservation on a retryable transcription failure", async () => {
+    getOpenAiServerConfig.mockReset();
+    getOpenAiServerConfig.mockReturnValue({
+      analysisPromptVersion: "v1",
+      analysisSchemaVersion: "v1",
+    });
+    const { client, jobs, rpcCalls } = createClient([
+      {
+        id: "job_1",
+        organization_id: "org_1",
+        call_id: "call_1",
+        job_type: "transcription",
+        status: "queued",
+        attempt_count: 0,
+        max_attempts: 3,
+        priority: 100,
+        scheduled_at: "2026-04-11T00:00:00.000Z",
+        started_at: null,
+        completed_at: null,
+        lease_expires_at: null,
+        dedupe_key: "call_1:transcription",
+        payload_json: {},
+        last_error: null,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+      },
+    ]);
+
+    await runAiJobs(client as never, {
+      limit: 1,
+      handlers: {
+        // Default-retryable error (no retryable:false) with attempts remaining.
+        transcription: vi.fn(async () => {
+          throw new Error("Upstream returned 500.");
+        }),
+        analysis: vi.fn(async () => ({
+          modelName: "gpt-4.1-mini",
+          summary: "Summary",
+          suggestedDisposition: "qualified" as const,
+          confidence: 0.9,
+          flagCount: 0,
+        })),
+      },
+    });
+
+    expect(jobs[0]).toMatchObject({ status: "retry_scheduled" });
+    // The hold stays open across retries; only a terminal failure releases it.
+    expect(rpcCalls.some((c) => c.name === "release_call_processing_hold")).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
 
 /**
  * Shared, hardened recording fetcher used by transcription (and, later, by
@@ -69,6 +70,46 @@ function isBlockedIpv6Host(hostname: string) {
   );
 }
 
+/**
+ * True if `ip` is an IP literal in a private, loopback, link-local, or
+ * unspecified range we refuse to connect to. Returns false for non-IP strings
+ * (callers resolve hostnames separately) — see `assertHostResolvesToPublic`.
+ */
+export function isBlockedIpAddress(ip: string): boolean {
+  const version = isIP(ip);
+  if (version === 4) return isBlockedIpv4Host(ip);
+  if (version === 6) return isBlockedIpv6Host(ip);
+  return false;
+}
+
+/**
+ * Defend against SSRF via DNS: a *public* hostname (which passes the literal
+ * checks in `assertSafeRecordingUrl`) can still resolve to a private/loopback
+ * IP. Resolve the host and reject if ANY returned address is blocked.
+ *
+ * This validates before we connect; it does not fully close the DNS-rebinding
+ * TOCTOU window (the kernel may re-resolve at connect time). Connect-time IP
+ * pinning (a custom undici dispatcher) would, and is tracked as future
+ * hardening — this resolve-and-validate guard is the baseline for the current
+ * Ringba/S3 threat model. A lookup failure is left to the subsequent fetch to
+ * surface as a (retryable) network error.
+ */
+export async function assertHostResolvesToPublic(hostname: string): Promise<void> {
+  // IP literals were already validated by `assertSafeRecordingUrl`.
+  if (isIP(hostname)) return;
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await lookup(hostname, { all: true });
+  } catch {
+    return;
+  }
+  for (const { address } of addresses) {
+    if (isBlockedIpAddress(address)) {
+      throw createNonRetryableError("Recording URL host resolves to a private or loopback address.");
+    }
+  }
+}
+
 export function assertSafeRecordingUrl(urlText: string): URL {
   let parsedUrl: URL;
   try {
@@ -90,11 +131,7 @@ export function assertSafeRecordingUrl(urlText: string): URL {
     throw createNonRetryableError("Recording URL hostname is not allowed.");
   }
 
-  const ipVersion = isIP(hostname);
-  if (
-    (ipVersion === 4 && isBlockedIpv4Host(hostname)) ||
-    (ipVersion === 6 && isBlockedIpv6Host(hostname))
-  ) {
+  if (isBlockedIpAddress(hostname)) {
     throw createNonRetryableError("Recording URL must not target a private or loopback host.");
   }
 
@@ -269,6 +306,10 @@ export async function fetchRecordingWithGuards(
   let response: Response;
 
   for (;;) {
+    // Re-resolve and re-validate the host on every hop (initial + each redirect)
+    // so a public hostname that resolves to a private IP is rejected.
+    await assertHostResolvesToPublic(current.hostname);
+
     const headers: Record<string, string> = {};
     if (
       options.auth &&

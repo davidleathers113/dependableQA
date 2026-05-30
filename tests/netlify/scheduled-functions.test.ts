@@ -25,13 +25,21 @@ beforeEach(() => {
 });
 
 describe("ai-dispatch-scheduled", () => {
-  it("runs the AI job queue and reports processed/recovered counts", async () => {
+  it("sweeps expired holds and reports processed/recovered/swept counts", async () => {
+    // The scheduled run sweeps expired wallet reservations (migration 0018)
+    // before draining the queue; surface its count in the response.
+    getAdminSupabase.mockReturnValue({ rpc: async () => ({ data: 4, error: null }) });
     runAiJobs.mockResolvedValue({ processed: [{ id: "a" }, { id: "b" }], recovered: [{ id: "c" }] });
 
     const response = await aiDispatchScheduled();
 
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({ ok: true, processedCount: 2, recoveredCount: 1 });
+    expect(JSON.parse(response.body)).toEqual({
+      ok: true,
+      processedCount: 2,
+      recoveredCount: 1,
+      sweptHolds: 4,
+    });
     expect(runAiJobs).toHaveBeenCalledTimes(1);
   });
 

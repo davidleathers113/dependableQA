@@ -1591,6 +1591,64 @@ export type Database = {
           },
         ]
       }
+      wallet_processing_holds: {
+        Row: {
+          amount_cents: number
+          billing_account_id: string
+          call_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          organization_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount_cents: number
+          billing_account_id: string
+          call_id: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          organization_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          billing_account_id?: string
+          call_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          organization_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_processing_holds_billing_account_id_fkey"
+            columns: ["billing_account_id"]
+            isOneToOne: false
+            referencedRelation: "billing_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_processing_holds_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallet_processing_holds_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1643,6 +1701,19 @@ export type Database = {
         Returns: boolean
       }
       is_org_member: { Args: { org_id: string }; Returns: boolean }
+      release_call_processing_hold: {
+        Args: { p_call_id: string; p_organization_id: string }
+        Returns: boolean
+      }
+      reserve_calls_for_processing: {
+        Args: {
+          p_billing_account_id: string
+          p_calls: Json
+          p_organization_id: string
+        }
+        Returns: boolean
+      }
+      sweep_expired_processing_holds: { Args: never; Returns: number }
     }
     Enums: {
       call_review_status: "unreviewed" | "in_review" | "reviewed" | "reopened"

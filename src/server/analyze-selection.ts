@@ -2,7 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import type { Database } from "../../supabase/types";
 import { insertAuditLog } from "../lib/app-data";
-import { estimateCallProcessingCents, loadBillingContext, loadWalletBalanceCents } from "./ai-pricing";
+import {
+  estimateCallProcessingCents,
+  loadAvailableBalanceCents,
+  loadBillingContext,
+  reserveCallsForProcessing,
+} from "./ai-pricing";
 import { enqueueAiJob } from "./ai-jobs";
 import { RINGBA_MANUAL_IMPORT_MAX_RECORDS } from "./ringba-calllogs";
 
@@ -123,24 +128,35 @@ export async function enqueueAnalysisForCalls(
     });
   }
 
-  // Wallet gate: block up front if the calls we'd actually transcribe would cost
-  // more than the available balance. Only transcription is billed (per the
-  // existing per-minute model); analysis-only re-runs add no charge. When no
-  // billing account is configured we can't meter, so we don't block.
+  // Wallet gate: RESERVE funds up front for the calls we'd actually transcribe,
+  // so two concurrent requests can't both pass on the same balance and leave
+  // completed work under-billed. Only transcription is billed (per the existing
+  // per-minute model); analysis-only re-runs add no charge. When no billing
+  // account is configured we can't meter, so we don't reserve. The reservation
+  // is settled by the per-call debit on completion and released on terminal
+  // failure (see ai-jobs.ts) or by the expiry sweep. See migration 0018.
   const billing = await loadBillingContext(client, options.organizationId);
   if (billing) {
+    const callsToReserve: Array<{ callId: string; amountCents: number }> = [];
     let estimateCents = 0;
     for (const callId of requestedIds) {
       const call = found.get(callId);
       if (!call || call.transcriptionStatus === "completed" || !call.recordingUrl) {
         continue;
       }
-      estimateCents += estimateCallProcessingCents(call.durationSeconds, billing.perMinuteRateCents);
+      const amountCents = estimateCallProcessingCents(call.durationSeconds, billing.perMinuteRateCents);
+      estimateCents += amountCents;
+      callsToReserve.push({ callId, amountCents });
     }
     if (estimateCents > 0) {
-      const balance = await loadWalletBalanceCents(client, options.organizationId);
-      if (estimateCents > balance) {
-        throw new InsufficientBalanceError(estimateCents, balance);
+      const reserved = await reserveCallsForProcessing(client, {
+        organizationId: options.organizationId,
+        billingAccountId: billing.billingAccountId,
+        calls: callsToReserve,
+      });
+      if (!reserved) {
+        const available = await loadAvailableBalanceCents(client, options.organizationId);
+        throw new InsufficientBalanceError(estimateCents, available);
       }
     }
   }

@@ -32,10 +32,31 @@ function fakeClient(
   rows: CallRow[],
   batches: BatchRow[] = [],
   billing: BillingRow | null = null,
-  balanceCents = 0
+  balanceCents = 0,
+  reserveResult = true
 ) {
   return {
+    // The enqueue gate reserves funds via this RPC (migration 0018).
+    rpc: async (name: string, _args: unknown) => {
+      if (name === "reserve_calls_for_processing") {
+        return { data: reserveResult, error: null };
+      }
+      throw new Error(`Unexpected rpc: ${name}`);
+    },
     from(table: string) {
+      if (table === "wallet_processing_holds") {
+        // Only read on reservation failure (for the available-balance message);
+        // no open holds in these unit fixtures.
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                gt: async () => ({ data: [], error: null }),
+              }),
+            }),
+          }),
+        };
+      }
       if (table === "calls") {
         return {
           select: () => ({
@@ -288,13 +309,15 @@ describe("enqueueAnalysisForCalls", () => {
     expect(mocks.enqueueAiJob).not.toHaveBeenCalled();
   });
 
-  it("blocks (InsufficientBalanceError) when estimated transcription cost exceeds the balance", async () => {
-    // 1 call, 60s -> 1 billable minute at 100c = 100c estimate; balance only 50c.
+  it("blocks (InsufficientBalanceError) when the reservation cannot be taken", async () => {
+    // 1 call, 60s -> 1 billable minute at 100c = 100c estimate; reservation
+    // fails (insufficient available) and the message reports available = 50c.
     const client = fakeClient(
       [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending", duration_seconds: 60 }],
       [],
       { id: "ba_1", per_minute_rate_cents: 100 },
-      50
+      50,
+      false // reserve fails
     );
 
     await expect(
@@ -307,12 +330,13 @@ describe("enqueueAnalysisForCalls", () => {
     expect(mocks.enqueueAiJob).not.toHaveBeenCalled();
   });
 
-  it("queues when the wallet balance covers the estimate", async () => {
+  it("queues when the reservation succeeds (balance covers the estimate)", async () => {
     const client = fakeClient(
       [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending", duration_seconds: 60 }],
       [],
       { id: "ba_1", per_minute_rate_cents: 100 },
-      1000
+      1000,
+      true // reserve succeeds
     );
 
     const result = await enqueueAnalysisForCalls(client as never, {

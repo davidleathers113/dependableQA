@@ -61,6 +61,8 @@ A `GET` endpoint (POST returns 405). It:
 
 The Ringba API access token lives in `integrations.config.ringba.apiAccessToken` and is **never** returned to the browser — public config exposes only `apiTokenConfigured: boolean` (`getPublicIntegrationRingbaConfig`).
 
+**Recording-fetch SSRF guard** (`src/server/recording-fetch.ts`, shared by transcription, playback materialization, and the preflight): recording URLs are attacker-influenceable on some paths (the pixel accepts `recording_url` from the query string), so every fetch follows redirects manually and, on **each hop**, (a) rejects literal private/loopback hosts via `assertSafeRecordingUrl` and (b) resolves the hostname and rejects if any address is private via `assertHostResolvesToPublic`. **Known residual:** the resolve-and-validate guard does not fully close the DNS-rebinding TOCTOU window (the kernel may re-resolve to a different IP at connect time). Connect-time IP pinning (a custom `undici` dispatcher with a validating `connect.lookup`) would close it and is tracked as future hardening; the current guard is the baseline for the Ringba/S3 threat model.
+
 ## Adding a provider
 
 1. Extend the `integration_provider` enum (new migration) if needed.

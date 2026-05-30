@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../supabase/types";
-import { assertSafeRecordingUrl, detectAudioExtension } from "./recording-fetch";
+import { assertHostResolvesToPublic, assertSafeRecordingUrl, detectAudioExtension } from "./recording-fetch";
 
 type SupabaseAny = SupabaseClient<Database>;
 
@@ -63,16 +63,26 @@ async function cancelBody(response: Response) {
   }
 }
 
+interface RedirectedResponse {
+  response: Response;
+  /** The final URL after all redirects — its path is the authoritative source
+   *  for an extension-based audio sniff (Ringba redirects to an S3 key whose
+   *  path differs from the original recording URL). */
+  finalUrl: string;
+}
+
 /** Issue a request, following redirects manually and re-validating each hop. */
 async function requestWithRedirects(
   method: "HEAD" | "GET",
   urlText: string,
   extraHeaders: Record<string, string>,
   timeoutMs: number
-): Promise<Response> {
+): Promise<RedirectedResponse> {
   let current = assertSafeRecordingUrl(urlText);
   let redirectCount = 0;
   for (;;) {
+    // Reject a public host that resolves to a private IP, on every hop.
+    await assertHostResolvesToPublic(current.hostname);
     const response = await fetch(current.toString(), {
       method,
       headers: extraHeaders,
@@ -82,7 +92,7 @@ async function requestWithRedirects(
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
       await cancelBody(response);
-      if (!location) return response;
+      if (!location) return { response, finalUrl: current.toString() };
       redirectCount += 1;
       if (redirectCount > 5) {
         throw new Error("Too many redirects.");
@@ -90,7 +100,7 @@ async function requestWithRedirects(
       current = assertSafeRecordingUrl(new URL(location, current).toString());
       continue;
     }
-    return response;
+    return { response, finalUrl: current.toString() };
   }
 }
 
@@ -128,18 +138,20 @@ export async function probeRecordingReadiness(
   options: { maxBytes: number; timeoutMs?: number }
 ): Promise<RecordingReadiness> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
-  const path = urlPathOf(urlText);
 
   // HEAD fast-path: only trusted when it gives a confident answer; a 4xx HEAD
   // (common for S3 presigned-GET URLs) is ignored in favor of the ranged GET.
   try {
-    const head = await requestWithRedirects("HEAD", urlText, {}, timeoutMs);
+    const { response: head, finalUrl } = await requestWithRedirects("HEAD", urlText, {}, timeoutMs);
     await cancelBody(head);
     if (head.ok) {
       const total = totalSizeFromHeaders(head);
       if (total != null && total > options.maxBytes) return "too_large";
       const contentType = head.headers.get("content-type") ?? "";
-      if (contentType && detectAudioExtension(EMPTY_BYTES, contentType, path)) {
+      // Extension fallback uses the FINAL (post-redirect) URL path, not the
+      // original — the original may carry no audio hint while the redirect
+      // target does.
+      if (contentType && detectAudioExtension(EMPTY_BYTES, contentType, urlPathOf(finalUrl))) {
         return "ready";
       }
     }
@@ -147,7 +159,7 @@ export async function probeRecordingReadiness(
     // ignore — fall through to the ranged GET
   }
 
-  let ranged: Response;
+  let ranged: RedirectedResponse;
   try {
     ranged = await requestWithRedirects("GET", urlText, { Range: `bytes=0-${SNIFF_BYTES - 1}` }, timeoutMs);
   } catch {
@@ -155,24 +167,24 @@ export async function probeRecordingReadiness(
     return "unreachable";
   }
 
-  if (FORBIDDEN_STATUSES.has(ranged.status)) {
-    await cancelBody(ranged);
+  if (FORBIDDEN_STATUSES.has(ranged.response.status)) {
+    await cancelBody(ranged.response);
     return "expired_or_forbidden";
   }
-  if (ranged.status !== 200 && ranged.status !== 206) {
-    await cancelBody(ranged);
+  if (ranged.response.status !== 200 && ranged.response.status !== 206) {
+    await cancelBody(ranged.response);
     return "unreachable";
   }
 
-  const total = totalSizeFromHeaders(ranged);
+  const total = totalSizeFromHeaders(ranged.response);
   if (total != null && total > options.maxBytes) {
-    await cancelBody(ranged);
+    await cancelBody(ranged.response);
     return "too_large";
   }
 
-  const sniff = await readUpTo(ranged, SNIFF_BYTES);
-  const contentType = ranged.headers.get("content-type") ?? "";
-  return detectAudioExtension(sniff, contentType, path) ? "ready" : "not_audio";
+  const sniff = await readUpTo(ranged.response, SNIFF_BYTES);
+  const contentType = ranged.response.headers.get("content-type") ?? "";
+  return detectAudioExtension(sniff, contentType, urlPathOf(ranged.finalUrl)) ? "ready" : "not_audio";
 }
 
 /**

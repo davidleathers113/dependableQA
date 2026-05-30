@@ -1,5 +1,6 @@
 import { getAdminSupabase } from "../../src/lib/supabase/admin-client";
 import { runAiJobs } from "../../src/server/ai-jobs";
+import { sweepExpiredProcessingHolds } from "../../src/server/ai-pricing";
 
 function json(statusCode: number, body: Record<string, unknown>) {
   return {
@@ -22,7 +23,19 @@ function getBatchLimit() {
 
 export async function handler() {
   try {
-    const result = await runAiJobs(getAdminSupabase(), {
+    const admin = getAdminSupabase();
+
+    // Best-effort: reclaim reservations from jobs that vanished without settling
+    // or releasing, so a lost job can't leak available wallet balance. Never
+    // block dispatch on this. See migration 0018.
+    let sweptHolds = 0;
+    try {
+      sweptHolds = await sweepExpiredProcessingHolds(admin);
+    } catch {
+      sweptHolds = 0;
+    }
+
+    const result = await runAiJobs(admin, {
       limit: getBatchLimit(),
     });
 
@@ -30,6 +43,7 @@ export async function handler() {
       ok: true,
       processedCount: result.processed.length,
       recoveredCount: result.recovered.length,
+      sweptHolds,
     });
   } catch (error) {
     return json(500, {

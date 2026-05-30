@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { lookup } from "node:dns/promises";
 import {
   assertSafeRecordingUrl,
   fetchRecordingWithGuards,
   resolveAudioExtension,
 } from "./recording-fetch";
+
+// DNS is mocked so the SSRF resolve-and-validate guard never hits the network.
+// Default: every host resolves to a public address (set per-test in beforeEach);
+// individual tests override with a private address to exercise the guard.
+vi.mock("node:dns/promises", () => ({ lookup: vi.fn() }));
+const PUBLIC_ADDR = [{ address: "93.184.216.34", family: 4 }];
 
 const MB = 1024 * 1024;
 
@@ -45,6 +52,10 @@ function stubFetchSequence(responses: Array<() => Response>) {
 function wavBytes() {
   return Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVE and pcm data")]);
 }
+
+beforeEach(() => {
+  vi.mocked(lookup).mockResolvedValue(PUBLIC_ADDR as never);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -226,6 +237,38 @@ describe("fetchRecordingWithGuards", () => {
       expect((error as { retryable?: boolean }).retryable).toBeUndefined();
       expect((error as Error).message).toContain("Unable to reach the recording host");
     }
+  });
+
+  it("rejects a public host that resolves to a private IP (SSRF via DNS)", async () => {
+    vi.mocked(lookup).mockResolvedValueOnce([{ address: "10.0.0.5", family: 4 }] as never);
+    const fn = vi.fn(async () => fakeResponse({ body: Buffer.from("ID3"), headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fn);
+    await expect(
+      fetchRecordingWithGuards("https://media.ringba.com/r", { maxBytes: 25 * MB })
+    ).rejects.toThrow("resolves to a private or loopback address");
+    expect(fn).not.toHaveBeenCalled(); // rejected before any connection
+  });
+
+  it("rejects when a redirect target's host resolves to a private IP", async () => {
+    // Original host resolves public; the S3 redirect target resolves private.
+    vi.mocked(lookup)
+      .mockResolvedValueOnce(PUBLIC_ADDR as never)
+      .mockResolvedValueOnce([{ address: "169.254.169.254", family: 4 }] as never);
+    stubFetchSequence([
+      () => fakeResponse({ status: 302, headers: { location: "https://attacker.example.com/x.mp3" } }),
+    ]);
+    await expect(
+      fetchRecordingWithGuards("https://media.ringba.com/r", { maxBytes: 25 * MB })
+    ).rejects.toThrow("resolves to a private or loopback address");
+  });
+
+  it("skips the DNS lookup for an IP-literal host", async () => {
+    stubFetchSequence([
+      () => fakeResponse({ body: Buffer.from("ID3 payload"), headers: { "content-type": "audio/mpeg" } }),
+    ]);
+    const result = await fetchRecordingWithGuards("https://93.184.216.34/r", { maxBytes: 25 * MB });
+    expect(result.extension).toBe(".mp3");
+    expect(vi.mocked(lookup)).not.toHaveBeenCalled(); // literal already validated
   });
 
   it("sends auth only to an authorized host and never forwards it across a redirect", async () => {

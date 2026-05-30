@@ -1,5 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { lookup } from "node:dns/promises";
 import { probeRecordingReadiness, verifyRecordings } from "./recording-preflight";
+
+// The SSRF guard resolves hosts; mock DNS so the probe never hits the network.
+vi.mock("node:dns/promises", () => ({ lookup: vi.fn() }));
 
 const MB = 1024 * 1024;
 
@@ -29,6 +33,18 @@ function stubFetchByMethod(handler: (method: string) => Response) {
     vi.fn(async (_url: string, init: RequestInit) => handler(String(init.method)))
   );
 }
+
+/** Stub fetch with a handler that sees both the URL and the HTTP method. */
+function stubFetchByUrl(handler: (url: string, method: string) => Response) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init: RequestInit) => handler(String(url), String(init.method)))
+  );
+}
+
+beforeEach(() => {
+  vi.mocked(lookup).mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as never);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -88,6 +104,27 @@ describe("probeRecordingReadiness", () => {
     expect(await probeRecordingReadiness("https://media.ringba.com/r", { maxBytes: 25 * MB })).toBe(
       "expired_or_forbidden"
     );
+  });
+
+  it("uses the final redirected URL path for the extension fallback", async () => {
+    // Original URL has no audio hint in its path; it 302-redirects to an S3
+    // key ending in `.mp3`. The body is unrecognizable and the content-type is
+    // ambiguous, so ONLY the final URL's path can classify this as audio.
+    const original = "https://media.ringba.com/recording-public?id=abc";
+    const s3 = "https://s3.amazonaws.com/bucket/key.mp3";
+    stubFetchByUrl((url, method) => {
+      if (url.startsWith("https://media.ringba.com/")) {
+        return fakeResponse({ status: 302, headers: { location: s3 } });
+      }
+      if (method === "HEAD") return fakeResponse({ status: 403 });
+      return fakeResponse({
+        status: 206,
+        headers: { "content-type": "application/octet-stream", "content-range": "bytes 0-9/10" },
+        body: Buffer.from("xxxxxxxxxx"),
+      });
+    });
+    // The original path "/recording-public" would classify as not_audio.
+    expect(await probeRecordingReadiness(original, { maxBytes: 25 * MB })).toBe("ready");
   });
 
   it("returns unreachable on a network failure", async () => {
