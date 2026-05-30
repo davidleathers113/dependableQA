@@ -198,6 +198,90 @@ describe("analyzeCall", () => {
     expect(insertedFlags).toHaveLength(0);
   });
 
+  it("repairs the call row from the stored analysis without re-calling OpenAI", async () => {
+    // A prior run wrote call_analyses but crashed before updating `calls`. The
+    // retry must repair analysis_status + the denormalized ai_* columns from the
+    // stored structured_output — not short-circuit and leave them stale.
+    const { client, callUpdates, insertedAnalyses } = createClient({
+      model_name: "gpt-4.1-mini",
+      summary: "Previously analyzed.",
+      disposition_suggested: "sale",
+      confidence: 0.9,
+      flag_summary: [],
+      structured_output: {
+        disposition: {
+          finalDisposition: "sale_completed",
+          journeyStageReached: "sale_or_enrollment_completed",
+          confidence: 0.9,
+          qualification: { status: "qualified", confidence: 0.9, disqualificationReasons: [], criteria: [] },
+          conversion: { status: "sale_completed", conversionType: "sale", evidence: ["I'll take it"], followUp: { required: false, type: "none", dueDateOrTimeMentioned: null, ownerMentioned: null, evidence: [] } },
+          fraud: { riskLevel: "low", fraudLikely: false, confidence: 0.8, categories: [], indicators: [], recommendedAction: "none" },
+          leadQuality: { status: "high_quality", billableRecommendation: "billable", payoutRecommendation: "pay_publisher", reasons: [] },
+        },
+      },
+    });
+
+    await analyzeCall(client as never, { organizationId: "org_1", callId: "call_1" });
+
+    expect(parseMock).not.toHaveBeenCalled();
+    expect(insertedAnalyses).toHaveLength(0);
+    expect(callUpdates).toHaveLength(1);
+    expect(callUpdates[0]).toMatchObject({
+      analysis_status: "completed",
+      analysis_error: null,
+      ai_final_disposition: "sale_completed",
+      ai_conversion_status: "sale_completed",
+      ai_payout_recommendation: "pay_publisher",
+      ai_analysis_version: "v1:v1",
+    });
+  });
+
+  it("bridges a high fraud risk into a fraud-category flag", async () => {
+    parseMock.mockResolvedValue({
+      output_parsed: {
+        summary: "Caller was coached and incentivized.",
+        suggestedDisposition: "unclear",
+        confidence: 0.6,
+        callOutcome: "unclear",
+        agentQuality: { score: 40, summary: "n/a" },
+        customerIntent: { primaryIntent: "unknown", summary: "Confused caller.", expressedInterest: { status: "no", strength: "none" } },
+        compliance: { status: "review", summary: "Possible misrepresentation." },
+        flags: [],
+        evidenceSpans: [],
+        redactionsNeeded: false,
+        followUpRecommendation: "Review.",
+        scoring: { overall: 40, compliance: 50, communication: 45, outcomeAlignment: 30 },
+        disposition: {
+          finalDisposition: "suspected_fraud",
+          journeyStageReached: "opening",
+          confidence: 0.86,
+          qualification: { status: "not_attempted", confidence: 0.5, disqualificationReasons: [], criteria: [] },
+          conversion: { status: "none", conversionType: "none", evidence: [], followUp: { required: false, type: "none", dueDateOrTimeMentioned: null, ownerMentioned: null, evidence: [] } },
+          fraud: {
+            riskLevel: "high",
+            fraudLikely: true,
+            confidence: 0.86,
+            categories: ["incentivized_or_non_genuine_interest"],
+            indicators: [
+              { type: "incentivized_caller", severity: "high", description: "Said they were told to call for a gift card.", evidence: ["I was promised a gift card"] },
+            ],
+            recommendedAction: "do_not_pay_publisher",
+          },
+          leadQuality: { status: "suspected_fraud", billableRecommendation: "not_billable", payoutRecommendation: "do_not_pay_publisher", reasons: [] },
+        },
+      },
+      usage: { input_tokens: 500, output_tokens: 120, total_tokens: 620 },
+    });
+
+    const { client, insertedFlags, callUpdates } = createClient();
+    await analyzeCall(client as never, { organizationId: "org_1", callId: "call_1" });
+
+    const fraudFlags = insertedFlags.filter((f) => f.flag_category === "fraud");
+    expect(fraudFlags).toHaveLength(1);
+    expect(fraudFlags[0]).toMatchObject({ severity: "high", source: "ai", flag_category: "fraud" });
+    expect(callUpdates[0]).toMatchObject({ ai_fraud_risk: "high", ai_payout_recommendation: "do_not_pay_publisher" });
+  });
+
   it("stores structured analysis output and AI flags from transcript context", async () => {
     parseMock.mockResolvedValue({
       output_parsed: {

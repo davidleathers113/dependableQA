@@ -27,6 +27,7 @@ function formatFilterChipLabel(key: string, value: string) {
   if (key === "conversionStatus") return `Conversion: ${humanizeToken(value) ?? value}`;
   if (key === "fraudRisk") return `Fraud: ${humanizeToken(value) ?? value}`;
   if (key === "leadQuality") return `Lead: ${humanizeToken(value) ?? value}`;
+  if (key === "payoutRecommendation") return `Payout: ${humanizeToken(value) ?? value}`;
   if (key === "dateFrom") return `From: ${value}`;
   if (key === "dateTo") return `To: ${value}`;
   if (key === "flagCategory") return `Flag type: ${value}`;
@@ -268,6 +269,21 @@ export function CallsToolbar({
                 >
                   <option value="">All lead qualities</option>
                   {options.leadQualities.map((value) => (
+                    <option key={value} value={value}>
+                      {humanizeToken(value) ?? value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Payout</span>
+                <select
+                  value={filters.payoutRecommendation ?? ""}
+                  onChange={(event) => update("payoutRecommendation", event.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  <option value="">All payout recs</option>
+                  {options.payoutRecommendations.map((value) => (
                     <option key={value} value={value}>
                       {humanizeToken(value) ?? value}
                     </option>

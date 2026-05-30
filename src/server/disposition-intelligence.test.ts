@@ -125,6 +125,7 @@ describe("deriveDispositionColumns", () => {
       ai_fraud_likely: false,
       ai_lead_quality: "acceptable",
       ai_billable_recommendation: "billable",
+      ai_payout_recommendation: "pay_publisher",
     });
   });
 
@@ -142,6 +143,7 @@ describe("deriveDispositionColumns", () => {
       ai_fraud_likely: null,
       ai_lead_quality: null,
       ai_billable_recommendation: null,
+      ai_payout_recommendation: null,
     });
   });
 

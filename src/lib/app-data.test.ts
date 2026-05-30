@@ -71,12 +71,14 @@ describe("calls filter helpers", () => {
       conversionStatus: "sale_completed",
       fraudRisk: "high",
       leadQuality: "suspected_fraud",
+      payoutRecommendation: "do_not_pay_publisher",
     });
 
     expect(params.get("finalDisposition")).toBe("sale_completed");
     expect(params.get("conversionStatus")).toBe("sale_completed");
     expect(params.get("fraudRisk")).toBe("high");
     expect(params.get("leadQuality")).toBe("suspected_fraud");
+    expect(params.get("payoutRecommendation")).toBe("do_not_pay_publisher");
 
     expect(buildCallFilters(params)).toEqual({
       ...DEFAULT_CALL_FILTERS,
@@ -84,6 +86,7 @@ describe("calls filter helpers", () => {
       conversionStatus: "sale_completed",
       fraudRisk: "high",
       leadQuality: "suspected_fraud",
+      payoutRecommendation: "do_not_pay_publisher",
     });
   });
 });

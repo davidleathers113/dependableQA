@@ -725,6 +725,7 @@ export type Database = {
           ai_fraud_risk: string | null
           ai_journey_stage: string | null
           ai_lead_quality: string | null
+          ai_payout_recommendation: string | null
           ai_qualification_status: string | null
           analysis_completed_at: string | null
           analysis_error: string | null
@@ -769,6 +770,7 @@ export type Database = {
           ai_fraud_risk?: string | null
           ai_journey_stage?: string | null
           ai_lead_quality?: string | null
+          ai_payout_recommendation?: string | null
           ai_qualification_status?: string | null
           analysis_completed_at?: string | null
           analysis_error?: string | null
@@ -813,6 +815,7 @@ export type Database = {
           ai_fraud_risk?: string | null
           ai_journey_stage?: string | null
           ai_lead_quality?: string | null
+          ai_payout_recommendation?: string | null
           ai_qualification_status?: string | null
           analysis_completed_at?: string | null
           analysis_error?: string | null

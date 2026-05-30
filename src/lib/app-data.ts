@@ -37,6 +37,7 @@ export interface CallFilters {
   conversionStatus?: string;
   fraudRisk?: string;
   leadQuality?: string;
+  payoutRecommendation?: string;
   sortBy?: CallSortBy;
   sortDirection?: CallSortDirection;
 }
@@ -160,6 +161,7 @@ export interface CallFilterOptions {
   conversionStatuses: string[];
   fraudRisks: string[];
   leadQualities: string[];
+  payoutRecommendations: string[];
 }
 
 // Fixed option lists for the disposition-intelligence filters. These mirror the
@@ -212,6 +214,12 @@ export const LEAD_QUALITY_FILTER_OPTIONS = [
   "low_quality",
   "invalid",
   "suspected_fraud",
+  "unclear",
+] as const;
+export const PAYOUT_RECOMMENDATION_FILTER_OPTIONS = [
+  "pay_publisher",
+  "do_not_pay_publisher",
+  "hold_for_review",
   "unclear",
 ] as const;
 
@@ -911,6 +919,7 @@ const DEFAULT_CALL_FILTERS: Required<
     | "conversionStatus"
     | "fraudRisk"
     | "leadQuality"
+    | "payoutRecommendation"
     | "sortBy"
     | "sortDirection"
   >
@@ -929,6 +938,7 @@ const DEFAULT_CALL_FILTERS: Required<
   conversionStatus: "",
   fraudRisk: "",
   leadQuality: "",
+  payoutRecommendation: "",
   sortBy: "startedAt",
   sortDirection: "desc",
 };
@@ -979,6 +989,7 @@ export function normalizeCallFilters(filters: CallFilters): CallFilters {
     conversionStatus: asString(filters.conversionStatus).trim(),
     fraudRisk: asString(filters.fraudRisk).trim(),
     leadQuality: asString(filters.leadQuality).trim(),
+    payoutRecommendation: asString(filters.payoutRecommendation).trim(),
     sortBy: filters.sortBy ?? DEFAULT_CALL_FILTERS.sortBy,
     sortDirection: filters.sortDirection ?? DEFAULT_CALL_FILTERS.sortDirection,
   };
@@ -999,6 +1010,7 @@ export function buildCallFilters(searchParams: URLSearchParams): CallFilters {
     conversionStatus: searchParams.get("conversionStatus") ?? "",
     fraudRisk: searchParams.get("fraudRisk") ?? "",
     leadQuality: searchParams.get("leadQuality") ?? "",
+    payoutRecommendation: searchParams.get("payoutRecommendation") ?? "",
     sortBy: toCallSortBy(searchParams.get("sortBy")),
     sortDirection: toCallSortDirection(searchParams.get("sortDirection")),
   });
@@ -1058,6 +1070,10 @@ export function filtersToSearchParams(filters: CallFilters) {
 
   if (normalized.leadQuality) {
     params.set("leadQuality", normalized.leadQuality);
+  }
+
+  if (normalized.payoutRecommendation) {
+    params.set("payoutRecommendation", normalized.payoutRecommendation);
   }
 
   if (normalized.sortBy && normalized.sortBy !== DEFAULT_CALL_FILTERS.sortBy) {
@@ -1408,6 +1424,28 @@ async function getCallsSummary(
     query = query.eq("current_disposition", normalized.disposition);
   }
 
+  // Keep summary metrics consistent with the row query: apply the same
+  // disposition-intelligence filters so the cards reflect the filtered set.
+  if (normalized.finalDisposition) {
+    query = query.eq("ai_final_disposition", normalized.finalDisposition);
+  }
+
+  if (normalized.conversionStatus) {
+    query = query.eq("ai_conversion_status", normalized.conversionStatus);
+  }
+
+  if (normalized.fraudRisk) {
+    query = query.eq("ai_fraud_risk", normalized.fraudRisk);
+  }
+
+  if (normalized.leadQuality) {
+    query = query.eq("ai_lead_quality", normalized.leadQuality);
+  }
+
+  if (normalized.payoutRecommendation) {
+    query = query.eq("ai_payout_recommendation", normalized.payoutRecommendation);
+  }
+
   if (normalized.dateFrom) {
     query = query.gte("started_at", normalized.dateFrom);
   }
@@ -1552,6 +1590,7 @@ export async function getCallFilterOptions(client: SupabaseAny, organizationId: 
     conversionStatuses: [...CONVERSION_STATUS_FILTER_OPTIONS],
     fraudRisks: [...FRAUD_RISK_FILTER_OPTIONS],
     leadQualities: [...LEAD_QUALITY_FILTER_OPTIONS],
+    payoutRecommendations: [...PAYOUT_RECOMMENDATION_FILTER_OPTIONS],
   };
 }
 
@@ -1610,6 +1649,10 @@ export async function getCallsPageData(client: SupabaseAny, organizationId: stri
 
   if (normalizedFilters.leadQuality) {
     query = query.eq("ai_lead_quality", normalizedFilters.leadQuality);
+  }
+
+  if (normalizedFilters.payoutRecommendation) {
+    query = query.eq("ai_payout_recommendation", normalizedFilters.payoutRecommendation);
   }
 
   if (normalizedFilters.dateFrom) {

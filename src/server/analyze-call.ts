@@ -40,6 +40,10 @@ const FLAG_CATEGORY_VALUES = [
   "follow_up",
   "transcript_quality",
   "operational",
+  // Disposition-intelligence categories so fraud / lead-quality findings are
+  // operationally visible as flags, not buried in structured JSON.
+  "fraud",
+  "lead_quality",
 ] as const;
 const FLAG_SEVERITY_VALUES = ["low", "medium", "high", "critical"] as const;
 
@@ -211,7 +215,15 @@ const LEAD_QUALITY_REASON_VALUES = [
   "other",
 ] as const;
 
-/** String-snippet evidence (verbatim transcript quotes), matching `flags.evidence`. */
+/**
+ * String-snippet evidence (verbatim transcript quotes), matching `flags.evidence`.
+ * Intentionally NOT constrained to be non-empty: OpenAI strict structured
+ * outputs don't support `minItems`/`minLength`, so a Zod `.min(1)` here would
+ * either be dropped from the generated JSON schema or cause valid responses to
+ * fail post-parse validation and abort the analysis. The "evidence-first, else
+ * unclear" rule is therefore enforced in the prompt (see buildAnalysisInstructions),
+ * not the schema.
+ */
 const snippetEvidence = z.array(z.string());
 
 /**
@@ -449,7 +461,7 @@ async function loadExistingAnalysis(
 ) {
   const result = await client
     .from("call_analyses")
-    .select("model_name, summary, disposition_suggested, confidence, flag_summary")
+    .select("model_name, summary, disposition_suggested, confidence, flag_summary, structured_output")
     .eq("organization_id", organizationId)
     .eq("call_id", callId)
     .eq("analysis_version", analysisVersion)
@@ -466,6 +478,10 @@ async function loadExistingAnalysis(
     suggestedDisposition: asString(row.disposition_suggested) || null,
     confidence: asNumber(row.confidence) ?? 0,
     flagCount: Array.isArray(row.flag_summary) ? row.flag_summary.length : 0,
+    // The stored structured output is the source of truth for the denormalized
+    // calls.ai_* columns — used to REPAIR them if a prior run wrote the analysis
+    // but failed before updating the call row.
+    structuredOutput: asRecord(row.structured_output),
   };
 }
 
@@ -579,10 +595,11 @@ async function requestStructuredAnalysis(
  * list/summary/report queries can filter without joining `call_analyses`. The
  * full detail stays in `call_analyses.structured_output`.
  */
-export function deriveDispositionColumns(analysis: CallAnalysisResult) {
+export function deriveDispositionColumns(analysis: CallAnalysisResult | null | undefined) {
   // Defensive: production output is schema-validated so the block is present,
-  // but never let a partial payload throw and abort the whole analysis write.
-  const d = analysis.disposition as DispositionIntelligenceResult | undefined;
+  // but never let a partial/absent payload throw and abort the analysis write
+  // (this also runs on the repair path with stored structured_output).
+  const d = analysis?.disposition as DispositionIntelligenceResult | undefined;
   if (!d) {
     return {
       ai_final_disposition: null,
@@ -594,6 +611,7 @@ export function deriveDispositionColumns(analysis: CallAnalysisResult) {
       ai_fraud_likely: null,
       ai_lead_quality: null,
       ai_billable_recommendation: null,
+      ai_payout_recommendation: null,
     };
   }
   return {
@@ -606,6 +624,7 @@ export function deriveDispositionColumns(analysis: CallAnalysisResult) {
     ai_fraud_likely: d.fraud.fraudLikely,
     ai_lead_quality: d.leadQuality.status,
     ai_billable_recommendation: d.leadQuality.billableRecommendation,
+    ai_payout_recommendation: d.leadQuality.payoutRecommendation,
   };
 }
 
@@ -635,6 +654,47 @@ function buildAiFlags(organizationId: string, callId: string, analysis: CallAnal
   }));
 }
 
+/**
+ * Bridge a high/critical fraud assessment into the flags system so it is
+ * operationally visible (Flags tab, flag_count, flag-based reports) rather than
+ * only living in structured JSON. Deterministic — does not depend on the model
+ * also emitting a fraud-category flag. Returns [] for low/none/unclear risk.
+ */
+function buildFraudFlags(organizationId: string, callId: string, analysis: CallAnalysisResult) {
+  const fraud = (analysis.disposition as DispositionIntelligenceResult | undefined)?.fraud;
+  if (!fraud) {
+    return [];
+  }
+  const risk = fraud.riskLevel;
+  if (risk !== "high" && risk !== "critical") {
+    return [];
+  }
+  const snippets = fraud.indicators.flatMap((indicator) => indicator.evidence);
+  const categories = fraud.categories.length > 0 ? fraud.categories.join(", ") : "unspecified";
+  const indicatorSummary =
+    fraud.indicators.length > 0
+      ? fraud.indicators.map((indicator) => indicator.description).filter((text) => text.length > 0).join(" ")
+      : "Model flagged elevated fraud risk without itemized indicators.";
+
+  return [
+    {
+      organization_id: organizationId,
+      call_id: callId,
+      flag_type: "analysis_flag",
+      flag_category: "fraud",
+      severity: normalizeSeverity(risk),
+      source: "ai",
+      status: "open",
+      title: `Fraud risk: ${risk}`,
+      description: `Categories: ${categories}. ${indicatorSummary}`,
+      evidence: {
+        snippets,
+        recommendedAction: fraud.recommendedAction,
+      } satisfies Json,
+    },
+  ];
+}
+
 export async function analyzeCall(
   client: SupabaseAny,
   options: {
@@ -656,6 +716,25 @@ export async function analyzeCall(
     analysisVersion
   );
   if (existingAnalysis) {
+    // Repair the call row from the stored analysis. A prior run may have written
+    // call_analyses but failed (crash/timeout) before updating `calls` — without
+    // this, the retry would short-circuit here and leave analysis_status and the
+    // denormalized ai_* columns permanently stale.
+    const repair = await client
+      .from("calls")
+      .update({
+        analysis_status: "completed",
+        analysis_error: null,
+        ...deriveDispositionColumns(existingAnalysis.structuredOutput as CallAnalysisResult | null),
+        ai_analysis_version: analysisVersion,
+      })
+      .eq("organization_id", options.organizationId)
+      .eq("id", options.callId);
+
+    if (repair.error) {
+      throw new Error(repair.error.message);
+    }
+
     return existingAnalysis;
   }
 
@@ -710,7 +789,10 @@ export async function analyzeCall(
     throw new Error(deleteFlags.error.message);
   }
 
-  const aiFlags = buildAiFlags(options.organizationId, options.callId, parsed);
+  const aiFlags = [
+    ...buildAiFlags(options.organizationId, options.callId, parsed),
+    ...buildFraudFlags(options.organizationId, options.callId, parsed),
+  ];
   if (aiFlags.length > 0) {
     const insertFlags = await client.from("call_flags").insert(aiFlags);
     if (insertFlags.error) {
