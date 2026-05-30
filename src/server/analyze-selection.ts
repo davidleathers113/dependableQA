@@ -181,11 +181,18 @@ export async function enqueueAnalysisForCalls(
     skipped.push({ callId, reason: "no_media" });
   }
 
+  // audit_logs.entity_id is a NOT NULL uuid, so it must be a real uuid — not a
+  // descriptive string. A batch-scoped run points at the import batch; an ad-hoc
+  // selection points at the organization. The human-readable action + details
+  // live in `action`/`metadata`.
+  const auditEntity = options.importBatchId
+    ? { entityType: "ringba_import_batch", entityId: options.importBatchId }
+    : { entityType: "organization", entityId: options.organizationId };
   await insertAuditLog(client, {
     organizationId: options.organizationId,
     actorUserId: options.actorUserId,
-    entityType: "call",
-    entityId: options.importBatchId ? `ringba_import:${options.importBatchId}` : "analyze_selected",
+    entityType: auditEntity.entityType,
+    entityId: auditEntity.entityId,
     action: "calls.analyze_selected",
     metadata: {
       importBatchId: options.importBatchId ?? null,

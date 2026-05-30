@@ -193,6 +193,52 @@ describe("enqueueAnalysisForCalls", () => {
     expect(mocks.enqueueAiJob).toHaveBeenCalledTimes(1);
   });
 
+  it("writes a uuid (org id) audit entity_id for an ad-hoc selection, not a string", async () => {
+    // Regression: audit_logs.entity_id is a NOT NULL uuid; writing the literal
+    // "analyze_selected" made every analyze-selected call 400 ("Unable to record
+    // audit log.") after enqueuing the job.
+    const client = fakeClient([
+      { id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "completed" },
+    ]);
+
+    await enqueueAnalysisForCalls(client as never, {
+      organizationId: "11111111-1111-1111-1111-111111111111",
+      callIds: ["call_1"],
+      actorUserId: "user_1",
+    });
+
+    expect(mocks.insertAuditLog).toHaveBeenCalledWith(
+      client,
+      expect.objectContaining({
+        entityType: "organization",
+        entityId: "11111111-1111-1111-1111-111111111111",
+        action: "calls.analyze_selected",
+      })
+    );
+  });
+
+  it("points the audit entity at the import batch uuid when a batch is supplied", async () => {
+    const client = fakeClient(
+      [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "completed" }],
+      [{ id: "22222222-2222-2222-2222-222222222222", organizationId: "org_1" }]
+    );
+
+    await enqueueAnalysisForCalls(client as never, {
+      organizationId: "org_1",
+      callIds: ["call_1"],
+      importBatchId: "22222222-2222-2222-2222-222222222222",
+      actorUserId: "user_1",
+    });
+
+    expect(mocks.insertAuditLog).toHaveBeenCalledWith(
+      client,
+      expect.objectContaining({
+        entityType: "ringba_import_batch",
+        entityId: "22222222-2222-2222-2222-222222222222",
+      })
+    );
+  });
+
   it("accepts an importBatchId that belongs to the org", async () => {
     const client = fakeClient(
       [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending" }],
