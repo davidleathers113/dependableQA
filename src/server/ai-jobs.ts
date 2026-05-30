@@ -675,8 +675,29 @@ export async function runAiJobs(
             callId: runningJob.call_id,
             durationSeconds: transcription?.durationSeconds ?? 0,
           });
-        } catch {
-          // Swallow — reconciled out-of-band; never blocks job completion.
+        } catch (debitError) {
+          // A billing hiccup must never fail a completed transcript or be
+          // re-charged on retry — but a silently-swallowed debit is a revenue
+          // leak with no paper trail. Record an audit event so unbilled
+          // processed calls are discoverable (completed transcription with no
+          // matching `call_processing` ledger row) and reconcilable. The audit
+          // write is itself guarded so it can never block job completion.
+          try {
+            await insertAuditLog(client, {
+              organizationId: runningJob.organization_id,
+              actorUserId: null,
+              entityType: "call",
+              entityId: runningJob.call_id,
+              action: "call_processing_debit_failed",
+              metadata: {
+                jobId: runningJob.id,
+                durationSeconds: transcription?.durationSeconds ?? 0,
+                error: debitError instanceof Error ? debitError.message : String(debitError),
+              },
+            });
+          } catch {
+            // Best-effort: even the audit write must not break the job.
+          }
         }
         await enqueueAiJob(client, {
           organizationId: runningJob.organization_id,
