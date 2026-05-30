@@ -61,6 +61,21 @@ Recording downloads from a URL (e.g. a Ringba `recordingUrl`, which 302-redirect
 - marks `400/401/403/404/410` as **non-retryable** (a dead/expired link fails fast instead of burning the job's retry budget); `5xx`/network/timeout stay retryable;
 - never logs the URL, query string, or any `Authorization` header (they can carry signed credentials), and only sends provider auth to a verified host on the first hop, never across a redirect. Ringba's public recording URLs need **no** auth — proven by `scripts/ringba-recording-smoke.mjs` (`npm run ringba:smoke-recording`).
 
+## Recording playback (`GET /api/calls/[callId]/recording`)
+
+The reviewer's audio player streams a short-lived Supabase signed URL of the
+private storage copy (`recording_storage_path`) — never the third-party
+`recording_url` directly. A Ringba/pixel import only sets `recording_url`, so the
+route **lazily materializes** on first play: if there is no storage object but a
+`recording_url` exists, it fetches through the shared `fetchRecordingWithGuards`,
+uploads the validated audio to the `recordings` bucket, sets
+`recording_storage_path`, then signs. This makes `hasRecording` honest (a Ringba
+call is playable before any AI spend) and pre-warms the exact object transcription
+later reuses. The materialization path **never enqueues** a transcription/analysis
+job, uses a larger size ceiling than transcription (playback isn't bound by
+OpenAI's 25 MB limit), and on a dead/expired source returns a clear "Recording
+source unavailable or expired."
+
 ## Analysis
 
 `analyze-call.ts` runs the analysis model and returns **structured output validated by a Zod schema** via `zodTextFormat`. The schema constrains disposition, call outcome, compliance status, and flag categories/severities to fixed enum sets (mirrored in `src/lib/call-review-api-schemas.ts`). Output drives `call_analyses`, `call_flags`, and the rolled-up `calls.current_disposition`.

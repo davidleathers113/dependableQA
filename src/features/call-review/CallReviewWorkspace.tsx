@@ -502,9 +502,12 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
               }
             }}
           />
+          {recordingQuery.isLoading && detail.hasRecording && (
+            <p className="text-xs text-slate-400">Loading recording…</p>
+          )}
           {recordingQuery.isError && detail.hasRecording && (
             <p className="text-xs text-amber-300">
-              Recording could not be loaded. Transcript review still works.
+              Recording source unavailable or expired. Transcript review still works.
             </p>
           )}
 
