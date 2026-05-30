@@ -3,12 +3,15 @@ import type { ImportBatchSummary } from "../../../lib/app-data";
 import {
   IMPORT_PROVIDER_OPTIONS,
   canRetryImportBatch,
-  formatImportDateTime,
   formatImportRelativeTime,
   getImportProviderLabel,
 } from "../helpers";
 import { ImportEmptyState } from "./ImportEmptyState";
 import { ImportStatusBadge } from "./ImportStatusBadge";
+import { LocalTime } from "../../../components/ui/LocalTime";
+
+// Matches formatImportDateTime's options (kept in helpers for non-render uses).
+const IMPORT_DATETIME_OPTIONS = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" } as const;
 
 interface Props {
   batches: ImportBatchSummary[];
@@ -154,7 +157,7 @@ export function ImportBatchTable({
                   <td className="px-6 py-4 text-right tabular-nums text-slate-300">{batch.rowCountRejected}</td>
                   <td className="px-6 py-4 text-right tabular-nums text-slate-300">{batch.rowCountTotal}</td>
                   <td className="px-6 py-4 text-slate-400">
-                    <div title={new Date(batch.createdAt).toLocaleString()}>{formatImportDateTime(batch.createdAt)}</div>
+                    <LocalTime value={batch.createdAt} options={IMPORT_DATETIME_OPTIONS} className="block" />
                     <div className="text-xs text-slate-500">{formatImportRelativeTime(batch.createdAt)}</div>
                   </td>
                   <td className="px-6 py-4 text-slate-400">{batch.uploadedByName ?? "—"}</td>

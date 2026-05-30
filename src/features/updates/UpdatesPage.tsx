@@ -1,3 +1,5 @@
+import { LocalTime } from "../../components/ui/LocalTime";
+
 interface UpdateEntry {
   id: string;
   title: string;
@@ -11,13 +13,7 @@ interface Props {
   initialEntries: UpdateEntry[];
 }
 
-function formatDateLabel(value: string) {
-  return new Date(value).toLocaleDateString([], {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-}
+const UPDATE_DATE_OPTIONS = { month: "long", day: "numeric", year: "numeric" } as const;
 
 export default function UpdatesPage({ initialEntries }: Props) {
   return (
@@ -43,7 +39,7 @@ export default function UpdatesPage({ initialEntries }: Props) {
                 </span>
               </div>
               <p className="text-xs font-medium text-slate-500">
-                {formatDateLabel(update.date)} / {update.version}
+                <LocalTime value={update.date} options={UPDATE_DATE_OPTIONS} /> / {update.version}
               </p>
               <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl">
                 <p className="text-sm leading-relaxed text-slate-300">{update.summary}</p>

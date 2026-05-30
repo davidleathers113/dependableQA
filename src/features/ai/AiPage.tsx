@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { AiOperationsSummary } from "../../lib/app-data";
+import { LocalTime } from "../../components/ui/LocalTime";
 
 interface Props {
   organizationId: string;
@@ -19,19 +20,6 @@ const starterPrompts = [
   "Show me import health.",
   "How is the wallet balance looking?",
 ];
-
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "—";
-  }
-
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function getStatusClassName(status: string) {
   const normalized = status.trim().toLowerCase();
@@ -179,11 +167,11 @@ export default function AiPage({ organizationId, initialOperationsSummary }: Pro
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
               <p className="text-[10px] uppercase tracking-wider text-slate-500">Oldest Pending Job</p>
-              <p className="mt-2 text-sm text-slate-200">{formatDateTime(operationsSummary.oldestPendingAt)}</p>
+              <LocalTime value={operationsSummary.oldestPendingAt} className="mt-2 block text-sm text-slate-200" />
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
               <p className="text-[10px] uppercase tracking-wider text-slate-500">Last Completed Job</p>
-              <p className="mt-2 text-sm text-slate-200">{formatDateTime(operationsSummary.lastCompletedAt)}</p>
+              <LocalTime value={operationsSummary.lastCompletedAt} className="mt-2 block text-sm text-slate-200" />
             </div>
           </div>
 
@@ -198,7 +186,7 @@ export default function AiPage({ organizationId, initialOperationsSummary }: Pro
                         {job.jobType} for {job.callerNumber ?? job.callId}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        Call started {formatDateTime(job.callStartedAt)} {job.currentDisposition ? `· ${job.currentDisposition}` : ""}
+                        Call started <LocalTime value={job.callStartedAt} /> {job.currentDisposition ? `· ${job.currentDisposition}` : ""}
                       </p>
                     </div>
                     <span className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getStatusClassName(job.status)}`}>
@@ -207,8 +195,8 @@ export default function AiPage({ organizationId, initialOperationsSummary }: Pro
                   </div>
                   <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-400">
                     <span>Attempts {job.attemptCount}/{job.maxAttempts}</span>
-                    <span>Scheduled {formatDateTime(job.scheduledAt)}</span>
-                    <span>Lease {formatDateTime(job.leaseExpiresAt)}</span>
+                    <span>Scheduled <LocalTime value={job.scheduledAt} /></span>
+                    <span>Lease <LocalTime value={job.leaseExpiresAt} /></span>
                   </div>
                   {job.lastError && (
                     <p className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">

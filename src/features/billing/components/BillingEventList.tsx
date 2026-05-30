@@ -1,4 +1,5 @@
 import type { BillingEventSummary } from "../../../lib/app-data";
+import { LocalTime } from "../../../components/ui/LocalTime";
 
 interface Props {
   events: BillingEventSummary[];
@@ -19,15 +20,6 @@ function toneClasses(tone: BillingEventSummary["tone"]) {
   }
 
   return "border-slate-800 bg-slate-900 text-slate-100";
-}
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export function BillingEventList({ events, isRefreshing }: Props) {
@@ -53,7 +45,7 @@ export function BillingEventList({ events, isRefreshing }: Props) {
                 className={`flex flex-col gap-2 rounded-xl border px-4 py-3 md:flex-row md:items-center md:justify-between ${toneClasses(event.tone)}`}
               >
                 <p className="text-sm font-medium">{event.message}</p>
-                <span className="text-xs opacity-80">{formatDateTime(event.createdAt)}</span>
+                <LocalTime value={event.createdAt} className="text-xs opacity-80" />
               </div>
             ))}
           </div>

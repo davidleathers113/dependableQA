@@ -5,24 +5,12 @@ import { getImportBatchDetail, type ImportBatchDetail } from "../../lib/app-data
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
 import { dispatchImportBatchRequest } from "./api";
 import { canRetryImportBatch, getImportRetryHelper, normalizeImportDispatchError } from "./helpers";
+import { LocalTime } from "../../components/ui/LocalTime";
 
 interface Props {
   organizationId: string;
   batchId: string;
   initialData: ImportBatchDetail | null;
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "—";
-  }
-
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Props) {
@@ -127,7 +115,7 @@ function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Pr
           </div>
         </div>
         <div className="mt-4 text-sm text-slate-400">
-          Created {formatDateTime(batch.createdAt)}. Processing window: {formatDateTime(batch.startedAt)} to {formatDateTime(batch.completedAt)}.
+          Created <LocalTime value={batch.createdAt} />. Processing window: <LocalTime value={batch.startedAt} /> to <LocalTime value={batch.completedAt} />.
         </div>
         <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-400">
           {getImportRetryHelper(batch.status)}

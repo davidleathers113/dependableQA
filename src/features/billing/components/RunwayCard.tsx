@@ -1,25 +1,15 @@
 import { Clock3 } from "lucide-react";
 import type { BillingRunwaySummary } from "../../../lib/app-data";
+import { LocalTime } from "../../../components/ui/LocalTime";
+
+const RECHARGE_DATE_OPTIONS = { month: "short", day: "numeric" } as const;
 
 interface Props {
   runway: BillingRunwaySummary;
   isRefreshing: boolean;
 }
 
-function formatShortDate(value: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  return new Date(value).toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-  });
-}
-
 export function RunwayCard({ runway, isRefreshing }: Props) {
-  const nextRechargeDate = formatShortDate(runway.estimatedNextRechargeAt);
-
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
       <div className={`${isRefreshing ? "animate-pulse" : ""} space-y-5`}>
@@ -42,8 +32,10 @@ export function RunwayCard({ runway, isRefreshing }: Props) {
               {runway.projectedDaysRemaining.toFixed(1)} days
             </p>
             <p className="text-sm text-slate-400">Based on recent average daily usage</p>
-            {nextRechargeDate ? (
-              <p className="text-sm text-slate-500">Projected next recharge: {nextRechargeDate}</p>
+            {runway.estimatedNextRechargeAt ? (
+              <p className="text-sm text-slate-500">
+                Projected next recharge: <LocalTime value={runway.estimatedNextRechargeAt} options={RECHARGE_DATE_OPTIONS} />
+              </p>
             ) : null}
           </div>
         )}

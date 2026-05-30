@@ -2,19 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import { getReportsSummary, type ReportsSummary } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
+import { LocalTime } from "../../components/ui/LocalTime";
 
 interface Props {
   organizationId: string;
   initialData: ReportsSummary;
-}
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function ReportsPageInner({ organizationId, initialData }: Props) {
@@ -137,7 +129,7 @@ function ReportsPageInner({ organizationId, initialData }: Props) {
                       <div>
                         <p className="text-sm font-medium text-white">{batch.filename}</p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {formatDateTime(batch.createdAt)} / {batch.rowCountRejected} rejected of {batch.rowCountTotal}
+                          <LocalTime value={batch.createdAt} /> / {batch.rowCountRejected} rejected of {batch.rowCountTotal}
                         </p>
                       </div>
                       <span className="rounded-full border border-slate-700 px-2 py-1 text-[10px] uppercase tracking-wider text-slate-300">

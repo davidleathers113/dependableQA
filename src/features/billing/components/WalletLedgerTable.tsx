@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Download } from "lucide-react";
 import { formatCurrency, type BillingLedgerEntrySummary } from "../../../lib/app-data";
+import { LocalTime } from "../../../components/ui/LocalTime";
 
 interface Props {
   ledger: BillingLedgerEntrySummary[];
@@ -9,6 +10,7 @@ interface Props {
 
 type DateRangeFilter = "all" | "7d" | "30d" | "90d";
 
+// Used for the client-side CSV export (not SSR-rendered, so no hydration risk).
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString([], {
     month: "short",
@@ -239,7 +241,7 @@ export function WalletLedgerTable({ ledger, isRefreshing }: Props) {
               ) : (
                 filteredLedger.map((entry) => (
                   <tr key={entry.id} className="transition-colors hover:bg-slate-800/50">
-                    <td className="px-6 py-4 text-slate-300">{formatDateTime(entry.createdAt)}</td>
+                    <td className="px-6 py-4 text-slate-300"><LocalTime value={entry.createdAt} /></td>
                     <td className="px-6 py-4 text-slate-300">{humanizeToken(entry.entryType)}</td>
                     <td className="px-6 py-4 text-slate-400">{entry.description ?? "—"}</td>
                     <td className="px-6 py-4">

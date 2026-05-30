@@ -9,6 +9,9 @@ import {
   updateTeamMemberRole,
 } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
+import { LocalTime } from "../../components/ui/LocalTime";
+
+const MEMBER_DATE_OPTIONS = { year: "numeric", month: "numeric", day: "numeric" } as const;
 
 interface Props {
   organizationId: string;
@@ -195,7 +198,7 @@ function TeamSettingsPageInner({ organizationId, currentUserId, currentUserRole,
                       </span>
                     </td>
                     <td className="px-6 py-4 text-slate-400">
-                      {new Date(member.createdAt).toLocaleDateString()}
+                      <LocalTime value={member.createdAt} options={MEMBER_DATE_OPTIONS} />
                     </td>
                   </tr>
                 ))

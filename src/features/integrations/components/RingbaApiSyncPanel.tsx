@@ -1,6 +1,7 @@
 import * as React from "react";
 import { CloudDownload, Play, PlugZap, Save } from "lucide-react";
 import type { IntegrationCard } from "../../../lib/app-data";
+import { LocalTime } from "../../../components/ui/LocalTime";
 import {
   DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
   DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS,
@@ -73,10 +74,6 @@ export function RingbaApiSyncPanel({
     integration.ringba.lookbackHours,
     integration.ringba.minimumDurationSeconds,
   ]);
-
-  const lastSyncLabel = integration.ringba.lastRingbaApiSyncAt
-    ? new Date(integration.ringba.lastRingbaApiSyncAt).toLocaleString()
-    : "Never";
 
   const handleSave = React.useCallback(() => {
     const nextAccount = accountId.trim();
@@ -262,7 +259,7 @@ export function RingbaApiSyncPanel({
       </div>
 
       <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-400">
-        Last successful sync watermark: <span className="text-slate-200">{lastSyncLabel}</span>
+        Last successful sync watermark: <span className="text-slate-200"><LocalTime value={integration.ringba.lastRingbaApiSyncAt} fallback="Never" /></span>
       </div>
 
       {validationMessage ? (

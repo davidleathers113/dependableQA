@@ -2,21 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import { formatCurrency, getOverviewData, type OverviewData } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
+import { LocalTime } from "../../components/ui/LocalTime";
 
 interface Props {
   organizationId: string;
   userId: string;
   initialData: OverviewData;
-}
-
-function formatRelativeTime(value: string) {
-  const date = new Date(value);
-  return date.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function OverviewPageInner({ organizationId, initialData }: Props) {
@@ -120,7 +111,7 @@ function OverviewPageInner({ organizationId, initialData }: Props) {
                   </div>
                   <p className="text-sm text-slate-300">{activity.message}</p>
                 </div>
-                <span className="text-xs text-slate-500 whitespace-nowrap">{formatRelativeTime(activity.createdAt)}</span>
+                <LocalTime value={activity.createdAt} className="text-xs text-slate-500 whitespace-nowrap" />
               </div>
               ))
             )}

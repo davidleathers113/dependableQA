@@ -3,24 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import { getApiKeysData, type ApiKeysData } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
+import { LocalTime } from "../../components/ui/LocalTime";
 
 interface Props {
   organizationId: string;
   currentUserRole: string;
   initialData: ApiKeysData;
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "Never";
-  }
-
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function ApiSettingsPageInner({ organizationId, currentUserRole, initialData }: Props) {
@@ -170,8 +158,8 @@ function ApiSettingsPageInner({ organizationId, currentUserRole, initialData }: 
                   <tr key={key.id}>
                     <td className="px-6 py-4 text-slate-200">{key.label}</td>
                     <td className="px-6 py-4 font-mono text-slate-300">{key.tokenPrefix}</td>
-                    <td className="px-6 py-4 text-slate-400">{formatDateTime(key.lastUsedAt)}</td>
-                    <td className="px-6 py-4 text-slate-400">{formatDateTime(key.createdAt)}</td>
+                    <td className="px-6 py-4 text-slate-400"><LocalTime value={key.lastUsedAt} fallback="Never" /></td>
+                    <td className="px-6 py-4 text-slate-400"><LocalTime value={key.createdAt} fallback="Never" /></td>
                     <td className="px-6 py-4 text-slate-300">{key.revokedAt ? "Revoked" : "Active"}</td>
                     <td className="px-6 py-4 text-right">
                       <button

@@ -5,25 +5,13 @@ import { getBrowserSupabase } from "../../../lib/supabase/browser-client";
 import { getAiEmptyState, getAiStatusClassName, getAiStatusLabel } from "../ai-status";
 import { CallReviewActions } from "./CallReviewActions";
 import { useCallReviewMutation } from "../useCallReviewMutation";
+import { LocalTime } from "../../../components/ui/LocalTime";
 
 interface Props {
   organizationId: string;
   callId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-function formatDateTime(value: string | null) {
-  if (!value) {
-    return "—";
-  }
-
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }: Props) {
@@ -117,7 +105,7 @@ export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }:
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Started</p>
-                    <p className="text-sm font-medium text-slate-200">{formatDateTime(detail.startedAt)}</p>
+                    <LocalTime value={detail.startedAt} className="text-sm font-medium text-slate-200" />
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Duration</p>
@@ -256,7 +244,7 @@ export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }:
                       <span className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${getAiStatusClassName(detail.analysisStatus)}`}>
                         {getAiStatusLabel(detail.analysisStatus)}
                       </span>
-                      <span>{formatDateTime(detail.analysisCreatedAt)}</span>
+                      <LocalTime value={detail.analysisCreatedAt} />
                     </div>
                     <p className="text-sm leading-6 text-slate-300">
                       {detail.analysisSummary ?? getAiEmptyState("analysis", detail.analysisStatus, detail.analysisError)}
@@ -363,7 +351,7 @@ export function CallDetailDrawer({ organizationId, callId, open, onOpenChange }:
                       {detail.history.map((item) => (
                         <div key={item.id} className="relative pl-10">
                           <div className="absolute left-0 top-1.5 h-4 w-4 rounded-full border-4 border-slate-950 bg-slate-900 ring-2 ring-slate-800"></div>
-                          <p className="text-xs text-slate-500 font-medium">{formatDateTime(item.createdAt)}</p>
+                          <LocalTime value={item.createdAt} className="text-xs text-slate-500 font-medium" />
                           <p className="text-sm text-slate-300">{item.title}</p>
                           <p className="mt-1 text-sm text-slate-500">{item.detail}</p>
                         </div>

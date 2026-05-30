@@ -1,4 +1,5 @@
 import type { CallListItem } from "../../../types/domain";
+import { LocalTime } from "../../../components/ui/LocalTime";
 
 export const CALLS_TABLE_COLUMNS = [
   { key: "dateTime", label: "Date/Time" },
@@ -52,15 +53,6 @@ export function CallsTable({
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}m ${secs}s`;
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString([], {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
   };
 
   const rowClassName = density === "compact" ? "px-4 py-3" : "px-6 py-4";
@@ -153,7 +145,7 @@ export function CallsTable({
                 >
                   {visibleSet.has("dateTime") && (
                     <td className={`${rowClassName} whitespace-nowrap`}>
-                      <div className="font-medium text-slate-200">{formatDate(row.startedAt)}</div>
+                      <div className="font-medium text-slate-200"><LocalTime value={row.startedAt} /></div>
                       <div className={secondaryTextClassName}>Started</div>
                     </td>
                   )}
@@ -244,7 +236,7 @@ export function CallsTable({
                   )}
                   {visibleSet.has("lastUpdated") && (
                     <td className={`${rowClassName} whitespace-nowrap text-slate-500`}>
-                      {formatDate(row.lastUpdatedAt)}
+                      <LocalTime value={row.lastUpdatedAt} />
                     </td>
                   )}
                   <td className={`${rowClassName} text-right`}>

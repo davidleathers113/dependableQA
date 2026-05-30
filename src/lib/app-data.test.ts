@@ -6,6 +6,7 @@ import {
   deriveBillingRunwaySummary,
   filtersToSearchParams,
   getIntegrationsSummary,
+  getOverviewData,
   getBillingPaymentMethodSummaryFromAccount,
   normalizeCallFilters,
 } from "./app-data";
@@ -298,5 +299,48 @@ describe("integrations summary helpers", () => {
         minimumDurationSeconds: 30,
       },
     });
+  });
+});
+
+describe("getOverviewData balance", () => {
+  // Chainable + thenable stand-in for a Supabase query builder that mirrors the
+  // real array-vs-object semantics: awaiting the builder yields `data` as-is
+  // (an array for .limit()), while .maybeSingle() unwraps to the first row. This
+  // is what makes the test a genuine regression guard for the array-access bug.
+  function makeQuery(result: { data?: unknown; error: unknown; count?: number }) {
+    const q: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "gte", "order", "limit"]) {
+      q[method] = () => q;
+    }
+    q.maybeSingle = () =>
+      Promise.resolve({
+        data: Array.isArray(result.data) ? (result.data[0] ?? null) : result.data,
+        error: result.error,
+      });
+    q.then = (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+      Promise.resolve(result).then(resolve, reject);
+    return q;
+  }
+
+  function overviewClient(latestLedgerBalanceCents: number) {
+    const byTable: Record<string, { data?: unknown; error: unknown; count?: number }> = {
+      billing_accounts: { data: [{ id: "ba_1" }], error: null },
+      call_flags: { data: null, error: null, count: 0 },
+      import_batches: { data: [], error: null },
+      integration_events: { data: [], error: null },
+      calls: { data: [], error: null, count: 0 },
+      integrations: { data: [], error: null },
+      // .limit(1) returns an array; the fix's .maybeSingle() unwraps it.
+      wallet_ledger_entries: { data: [{ balance_after_cents: latestLedgerBalanceCents }], error: null },
+    };
+    return {
+      from: (table: string) => makeQuery(byTable[table] ?? { data: [], error: null }),
+    };
+  }
+
+  it("reads the latest ledger row's balance (regression: not 0 from array access)", async () => {
+    const data = await getOverviewData(overviewClient(124050) as never, "org_1");
+    // Pre-fix, the code read `.balance_after_cents` off the array -> undefined -> 0.
+    expect(data.balanceCents).toBe(124050);
   });
 });

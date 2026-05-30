@@ -1922,7 +1922,7 @@ export async function getOverviewData(client: SupabaseAny, organizationId: strin
     client.from("calls").select("duration_seconds", { count: "exact" }).eq("organization_id", organizationId).gte("started_at", monthStart),
     client.from("calls").select("id, flag_count, duration_seconds").eq("organization_id", organizationId),
     client.from("integrations").select("id, display_name, status").eq("organization_id", organizationId).order("updated_at", { ascending: false }).limit(3),
-    client.from("wallet_ledger_entries").select("balance_after_cents, created_at").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(1),
+    client.from("wallet_ledger_entries").select("balance_after_cents, created_at").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
 
   assertNoError(billingResult.error, "Unable to load billing account.");
