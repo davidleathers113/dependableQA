@@ -208,6 +208,7 @@ describe("analyzeCall", () => {
       disposition_suggested: "sale",
       confidence: 0.9,
       flag_summary: [],
+      created_at: "2026-05-30T09:00:00.000Z",
       structured_output: {
         disposition: {
           finalDisposition: "sale_completed",
@@ -229,6 +230,8 @@ describe("analyzeCall", () => {
     expect(callUpdates[0]).toMatchObject({
       analysis_status: "completed",
       analysis_error: null,
+      // Restored from the stored analysis timestamp, not the repair time.
+      analysis_completed_at: "2026-05-30T09:00:00.000Z",
       ai_final_disposition: "sale_completed",
       ai_conversion_status: "sale_completed",
       ai_payout_recommendation: "pay_publisher",

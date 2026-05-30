@@ -461,7 +461,7 @@ async function loadExistingAnalysis(
 ) {
   const result = await client
     .from("call_analyses")
-    .select("model_name, summary, disposition_suggested, confidence, flag_summary, structured_output")
+    .select("model_name, summary, disposition_suggested, confidence, flag_summary, structured_output, created_at")
     .eq("organization_id", organizationId)
     .eq("call_id", callId)
     .eq("analysis_version", analysisVersion)
@@ -482,6 +482,9 @@ async function loadExistingAnalysis(
     // calls.ai_* columns — used to REPAIR them if a prior run wrote the analysis
     // but failed before updating the call row.
     structuredOutput: asRecord(row.structured_output),
+    // The original analysis timestamp, so a repair restores the true
+    // analysis_completed_at rather than stamping the (later) repair time.
+    createdAt: asString(row.created_at) || null,
   };
 }
 
@@ -719,12 +722,16 @@ export async function analyzeCall(
     // Repair the call row from the stored analysis. A prior run may have written
     // call_analyses but failed (crash/timeout) before updating `calls` — without
     // this, the retry would short-circuit here and leave analysis_status and the
-    // denormalized ai_* columns permanently stale.
+    // denormalized ai_* columns permanently stale. We do NOT rebuild flags here:
+    // in the fresh path flags are inserted BEFORE the call_analyses upsert, so if
+    // an analysis row exists its flags (including the deterministic fraud flag)
+    // were already inserted in that same prior run.
     const repair = await client
       .from("calls")
       .update({
         analysis_status: "completed",
         analysis_error: null,
+        analysis_completed_at: existingAnalysis.createdAt ?? new Date().toISOString(),
         ...deriveDispositionColumns(existingAnalysis.structuredOutput as CallAnalysisResult | null),
         ai_analysis_version: analysisVersion,
       })
