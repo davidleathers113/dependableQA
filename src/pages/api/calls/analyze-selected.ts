@@ -9,6 +9,18 @@ import {
 
 export const prerender = false;
 
+// This route is the OpenAI-spend gate: it turns imported calls into billable
+// transcription/analysis jobs. Every current working role is allowed to spend
+// (owners/admins, the billing role, and the reviewers/analysts who work the
+// calls) — this is a deliberate product decision. The allowlist is explicit
+// rather than "any member" so a future read-only role is denied spend by
+// default instead of silently inheriting it.
+const AI_SPEND_ROLES = new Set(["owner", "admin", "billing", "reviewer", "analyst"]);
+
+function canSpendAi(role: string) {
+  return AI_SPEND_ROLES.has(role);
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -20,6 +32,10 @@ export const POST: APIRoute = async (context) => {
   const session = await requireApiSession(context);
   if (!session) {
     return json({ error: "Unauthorized" }, 401);
+  }
+
+  if (!canSpendAi(session.organization.role)) {
+    return json({ error: "Your role cannot queue AI analysis." }, 403);
   }
 
   const rawBody = await context.request.json().catch(() => null);

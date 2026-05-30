@@ -64,6 +64,25 @@ export async function enqueueAnalysisForCalls(
     );
   }
 
+  // If a batch id is supplied (for the audit trail), verify it belongs to this
+  // org before we record it. The call ids are already org-scoped below, so this
+  // is not a tenant-isolation control — it keeps a caller from stamping the
+  // audit log with an arbitrary or cross-org batch id.
+  if (options.importBatchId) {
+    const batch = await client
+      .from("ringba_import_batches")
+      .select("id")
+      .eq("id", options.importBatchId)
+      .eq("organization_id", options.organizationId)
+      .maybeSingle();
+    if (batch.error) {
+      throw new Error(batch.error.message);
+    }
+    if (!batch.data) {
+      throw new Error("Import batch not found.");
+    }
+  }
+
   const callRows = await client
     .from("calls")
     .select("id, recording_url, transcription_status")

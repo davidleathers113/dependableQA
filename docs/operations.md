@@ -51,7 +51,7 @@ These are `prerender = false` Astro routes authed by the app session (`requireAp
 | Route | Guard | Purpose |
 |---|---|---|
 | `POST /api/integrations/ringba/import` | owner/admin | Run a manual Ringba full-API import. Server **clamps `maxRecords` to 2000** (`RINGBA_MANUAL_IMPORT_MAX_RECORDS`) even if the body asks for more, imports metadata/recording links only (no AI), and tracks the run in `ringba_import_batches`. |
-| `POST /api/calls/analyze-selected` | any org member | The AI-spend gate. Queues transcription/analysis for the given call ids (org-verified, batch-capped). The **only** path that turns a Ringba import into OpenAI jobs. |
+| `POST /api/calls/analyze-selected` | owner/admin/billing/reviewer/analyst | The AI-spend gate. Queues transcription/analysis for the given call ids (org-verified, batch-capped). The **only** path that turns a Ringba import into OpenAI jobs. The role allowlist is explicit (`AI_SPEND_ROLES`) so a future read-only role is denied spend by default rather than inheriting it. |
 | `POST /api/settings/integrations` `action: test-ringba-connection` | owner/admin | Fetches a 1-row Ringba sample to validate credentials; imports nothing. |
 
 **Batch lifecycle (`ringba_import_batches`):** `running` → `completed` (no rejects) / `partial` (some rejects) / `failed` (fetch error or finalize error; `error` column populated, a `ringba.api.import_failed` integration event recorded). The cost-control invariant: an import alone creates **no** `ai_jobs` rows — those appear only after `analyze-selected`.

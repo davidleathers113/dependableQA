@@ -42,6 +42,35 @@ describe("POST /api/calls/analyze-selected", () => {
     expect(response.status).toBe(401);
   });
 
+  it.each(["owner", "admin", "billing", "reviewer", "analyst"])(
+    "allows the %s role to queue analysis",
+    async (role) => {
+      requireApiSession.mockResolvedValue({
+        user: { id: "user_1" },
+        organization: { id: "org_1", role },
+      });
+      enqueueAnalysisForCalls.mockResolvedValue({
+        requested: 1,
+        transcriptionQueued: 1,
+        analysisQueued: 0,
+        skipped: [],
+      });
+      const response = await POST(ctx({ callIds: ["c1"] }));
+      expect(response.status).toBe(200);
+      expect(enqueueAnalysisForCalls).toHaveBeenCalled();
+    }
+  );
+
+  it("returns 403 for a role outside the AI-spend allowlist", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "viewer" },
+    });
+    const response = await POST(ctx({ callIds: ["c1"] }));
+    expect(response.status).toBe(403);
+    expect(enqueueAnalysisForCalls).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when callIds is empty", async () => {
     requireApiSession.mockResolvedValue({
       user: { id: "user_1" },

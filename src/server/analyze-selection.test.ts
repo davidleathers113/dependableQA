@@ -16,8 +16,13 @@ interface CallRow {
   transcription_status: string;
 }
 
+interface BatchRow {
+  id: string;
+  organizationId: string;
+}
+
 /** Fake client: calls.select().eq("organization_id").in("id", ids) resolves to org-scoped rows. */
-function fakeClient(rows: CallRow[]) {
+function fakeClient(rows: CallRow[], batches: BatchRow[] = []) {
   return {
     from(table: string) {
       if (table === "calls") {
@@ -27,6 +32,20 @@ function fakeClient(rows: CallRow[]) {
               in: async (_idCol: string, ids: string[]) => ({
                 data: rows.filter((r) => ids.includes(r.id)),
                 error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === "ringba_import_batches") {
+        return {
+          select: () => ({
+            eq: (_idCol: string, id: string) => ({
+              eq: (_orgCol: string, org: string) => ({
+                maybeSingle: async () => ({
+                  data: batches.find((b) => b.id === id && b.organizationId === org) ?? null,
+                  error: null,
+                }),
               }),
             }),
           }),
@@ -139,5 +158,54 @@ describe("enqueueAnalysisForCalls", () => {
 
     expect(result.requested).toBe(1);
     expect(mocks.enqueueAiJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts an importBatchId that belongs to the org", async () => {
+    const client = fakeClient(
+      [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending" }],
+      [{ id: "batch_1", organizationId: "org_1" }]
+    );
+
+    const result = await enqueueAnalysisForCalls(client as never, {
+      organizationId: "org_1",
+      callIds: ["call_1"],
+      importBatchId: "batch_1",
+      actorUserId: "user_1",
+    });
+
+    expect(result.transcriptionQueued).toBe(1);
+  });
+
+  it("rejects an importBatchId from another org without queueing anything", async () => {
+    const client = fakeClient(
+      [{ id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending" }],
+      [{ id: "batch_1", organizationId: "org_other" }]
+    );
+
+    await expect(
+      enqueueAnalysisForCalls(client as never, {
+        organizationId: "org_1",
+        callIds: ["call_1"],
+        importBatchId: "batch_1",
+        actorUserId: "user_1",
+      })
+    ).rejects.toThrow("Import batch not found.");
+    expect(mocks.enqueueAiJob).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown importBatchId", async () => {
+    const client = fakeClient([
+      { id: "call_1", recording_url: "https://rec/1.mp3", transcription_status: "pending" },
+    ]);
+
+    await expect(
+      enqueueAnalysisForCalls(client as never, {
+        organizationId: "org_1",
+        callIds: ["call_1"],
+        importBatchId: "ghost_batch",
+        actorUserId: "user_1",
+      })
+    ).rejects.toThrow("Import batch not found.");
+    expect(mocks.enqueueAiJob).not.toHaveBeenCalled();
   });
 });
