@@ -3,24 +3,28 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
 import {
   getCallDetail,
-  type CallAiMoment,
   type CallDetail,
   type CallFlagItem,
-  type TranscriptSegment,
 } from "../../lib/app-data";
 import { useCallReviewMutation } from "../calls/useCallReviewMutation";
 import { getActiveSegmentId } from "./activeSegment";
-import { TranscriptPane } from "./TranscriptPane";
+import { groupTranscriptSegments, type TranscriptRow } from "./groupTranscriptSegments";
+import { TranscriptView, type TranscriptMode } from "./TranscriptView";
 import { WaveformPanel } from "./WaveformPanel";
 import { usePlaybackState } from "./usePlaybackState";
 import { formatTimestamp } from "./formatTime";
-import { CallReviewRightRail } from "./CallReviewRightRail";
+import { QaPanel, type QaTab } from "./QaPanel";
+import { CallOutline } from "./CallOutline";
+import { FlagDrawer, type FlagAnchor, type FlagDraft } from "./FlagDrawer";
 
 interface Props {
   organizationId: string;
   callId: string;
   initialData: CallDetail | null;
 }
+
+const MODE_STORAGE_KEY = "dependableqa:transcript-mode";
+const TRANSCRIPT_MODES: TranscriptMode[] = ["compact", "conversation", "raw"];
 
 async function fetchRecordingUrl(callId: string) {
   const response = await fetch(`/api/calls/${callId}/recording`);
@@ -75,25 +79,68 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
   const [transcriptQuery, setTranscriptQuery] = React.useState("");
   const [autoFollow, setAutoFollow] = React.useState(true);
   const [searchMatchIndex, setSearchMatchIndex] = React.useState(0);
-  const [scrollRequest, setScrollRequest] = React.useState<{ segmentId: string; nonce: number } | null>(null);
+  const [scrollRequest, setScrollRequest] = React.useState<{ rowId: string; nonce: number } | null>(null);
   const [selectedFlagId, setSelectedFlagId] = React.useState<string | null>(null);
   const [mobileTab, setMobileTab] = React.useState<"transcript" | "review">("transcript");
+  const [qaTab, setQaTab] = React.useState<QaTab>("summary");
+  // Initialized to "compact" on first render (matches SSR) and hydrated from
+  // localStorage in an effect to avoid a hydration mismatch.
+  const [mode, setMode] = React.useState<TranscriptMode>("compact");
+  const [flagDrawerOpen, setFlagDrawerOpen] = React.useState(false);
+  const [flagAnchor, setFlagAnchor] = React.useState<FlagAnchor | null>(null);
   const deepLinkAppliedRef = React.useRef(false);
   const [noteDraft, setNoteDraft] = React.useState("");
-  const [flagDraft, setFlagDraft] = React.useState({
+  const [flagDraft, setFlagDraft] = React.useState<FlagDraft>({
     title: "",
     flagCategory: "compliance",
-    severity: "medium" as CallFlagItem["severity"],
+    severity: "medium",
     description: "",
   });
 
-  const searchMatches = React.useMemo((): TranscriptSegment[] => {
+  React.useEffect(() => {
+    const saved = window.localStorage.getItem(MODE_STORAGE_KEY);
+    if (saved === "compact" || saved === "conversation" || saved === "raw") {
+      setMode(saved);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    window.localStorage.setItem(MODE_STORAGE_KEY, mode);
+  }, [mode]);
+
+  const turns = React.useMemo(
+    () => (detail ? groupTranscriptSegments(detail.transcriptSegments) : []),
+    [detail]
+  );
+
+  // Rows the view renders and the workspace operates on. Raw mode uses original
+  // ASR segments; compact/conversation use grouped turns. Both satisfy
+  // TranscriptRow, so seek/active/search share one code path.
+  const rows = React.useMemo<TranscriptRow[]>(
+    () => (mode === "raw" && detail ? detail.transcriptSegments : turns),
+    [mode, detail, turns]
+  );
+
+  const findRowIdAtTime = React.useCallback(
+    (time: number) => {
+      let rowId = rows[0]?.id ?? "";
+      for (const row of rows) {
+        if (row.start != null && row.start <= time) {
+          rowId = row.id;
+        }
+      }
+      return rowId;
+    },
+    [rows]
+  );
+
+  const searchMatches = React.useMemo((): TranscriptRow[] => {
     const q = transcriptQuery.trim().toLowerCase();
-    if (!detail || q.length === 0) {
+    if (q.length === 0) {
       return [];
     }
-    return detail.transcriptSegments.filter((s: TranscriptSegment) => s.text.toLowerCase().includes(q));
-  }, [detail, transcriptQuery]);
+    return rows.filter((row) => row.text.toLowerCase().includes(q));
+  }, [rows, transcriptQuery]);
 
   React.useEffect(() => {
     if (searchMatches.length === 0) {
@@ -105,31 +152,10 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
     }
   }, [searchMatches.length, searchMatchIndex]);
 
-  const activeSegmentId = React.useMemo(() => {
-    if (!detail) {
-      return null;
-    }
-    return getActiveSegmentId(detail.transcriptSegments, playback.currentTime);
-  }, [detail, playback.currentTime]);
-
-  React.useEffect(() => {
-    if (!detail || deepLinkAppliedRef.current) {
-      return;
-    }
-    const url = new URL(window.location.href);
-    const t = url.searchParams.get("t");
-    if (t !== null) {
-      const n = Number(t);
-      if (Number.isFinite(n) && n >= 0) {
-        playback.seek(n);
-      }
-    }
-    const f = url.searchParams.get("flag");
-    if (f && f.length > 0) {
-      setSelectedFlagId(f);
-    }
-    deepLinkAppliedRef.current = true;
-  }, [detail, playback]);
+  const activeRowId = React.useMemo(
+    () => getActiveSegmentId(rows, playback.currentTime),
+    [rows, playback.currentTime]
+  );
 
   const invalidateDetail = React.useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["call-detail-page", organizationId, callId] });
@@ -151,6 +177,7 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
     onSuccess: async () => {
       await invalidateDetail();
       setFlagDraft((prev) => ({ ...prev, title: "", description: "" }));
+      setFlagDrawerOpen(false);
     },
   });
 
@@ -187,14 +214,67 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
     },
   });
 
-  const onSeekToSegment = React.useCallback(
-    (segment: TranscriptSegment) => {
-      const start = segment.start ?? 0;
-      playback.seek(start);
+  const durationSeconds = playback.duration || (detail?.durationSeconds ?? 0);
+
+  const onSeekToRow = React.useCallback(
+    (row: TranscriptRow) => {
+      playback.seek(row.start ?? 0);
       setAutoFollow(true);
     },
     [playback]
   );
+
+  const openFlagDrawerAtPlayhead = React.useCallback(() => {
+    const start = playback.currentTime;
+    setFlagAnchor({
+      startSeconds: start,
+      endSeconds: durationSeconds > 0 ? Math.min(start + 4, durationSeconds) : start + 4,
+      excerpt: null,
+      source: "playhead",
+    });
+    setFlagDrawerOpen(true);
+  }, [playback, durationSeconds]);
+
+  const onFlagRow = React.useCallback(
+    (row: TranscriptRow) => {
+      const start = row.start ?? playback.currentTime;
+      const end = row.end ?? (durationSeconds > 0 ? Math.min(start + 4, durationSeconds) : start + 4);
+      setFlagAnchor({ startSeconds: start, endSeconds: end, excerpt: row.text, source: "transcript" });
+      setFlagDrawerOpen(true);
+    },
+    [playback, durationSeconds]
+  );
+
+  const onNoteRow = React.useCallback(
+    (row: TranscriptRow) => {
+      if (row.start != null) {
+        playback.seek(row.start);
+      }
+      setQaTab("notes");
+      setMobileTab("review");
+      window.setTimeout(() => noteInputRef.current?.focus(), 50);
+    },
+    [playback]
+  );
+
+  const submitFlag = React.useCallback(() => {
+    if (!flagAnchor) {
+      return;
+    }
+    const base = flagDraft.description.trim();
+    const description =
+      flagAnchor.source === "transcript" && flagAnchor.excerpt
+        ? [base, `“${flagAnchor.excerpt}”`].filter((s) => s.length > 0).join("\n\n")
+        : base;
+    createFlagMutation.mutate({
+      flagCategory: flagDraft.flagCategory,
+      severity: flagDraft.severity,
+      title: flagDraft.title.trim(),
+      description: description.length > 0 ? description : undefined,
+      startSeconds: flagAnchor.startSeconds,
+      endSeconds: flagAnchor.endSeconds ?? undefined,
+    });
+  }, [flagAnchor, flagDraft, createFlagMutation]);
 
   const goToSearchHit = React.useCallback(
     (direction: 1 | -1) => {
@@ -203,34 +283,30 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
       }
       const next = (searchMatchIndex + direction + searchMatches.length) % searchMatches.length;
       setSearchMatchIndex(next);
-      const seg = searchMatches[next];
-      if (!seg) {
+      const row = searchMatches[next];
+      if (!row) {
         return;
       }
-      const start = seg.start ?? 0;
-      playback.seek(start);
-      setScrollRequest({ segmentId: seg.id, nonce: Date.now() });
+      playback.seek(row.start ?? 0);
+      setScrollRequest({ rowId: row.id, nonce: Date.now() });
     },
     [searchMatches, searchMatchIndex, playback]
   );
+
+  const focusFlag = React.useCallback((id: string) => {
+    setSelectedFlagId(id);
+    setQaTab("flags");
+    setMobileTab("review");
+  }, []);
 
   const onJumpToFlag = React.useCallback(
     (flag: CallFlagItem) => {
       const t = flag.startSeconds ?? 0;
       playback.seek(t);
-      setSelectedFlagId(flag.id);
-      if (!detail) {
-        return;
-      }
-      let segmentId = detail.transcriptSegments[0]?.id ?? "";
-      for (const seg of detail.transcriptSegments) {
-        if (seg.start != null && seg.start <= t) {
-          segmentId = seg.id;
-        }
-      }
-      setScrollRequest({ segmentId, nonce: Date.now() });
+      focusFlag(flag.id);
+      setScrollRequest({ rowId: findRowIdAtTime(t), nonce: Date.now() });
     },
-    [playback, detail]
+    [playback, focusFlag, findRowIdAtTime]
   );
 
   const onReplayFlag = React.useCallback(
@@ -243,14 +319,29 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
 
   const onResolveFlag = React.useCallback(
     (flag: CallFlagItem) => {
-      actionMutation.mutate({
-        action: "flag-status",
-        flagId: flag.id,
-        status: "confirmed",
-      });
+      actionMutation.mutate({ action: "flag-status", flagId: flag.id, status: "confirmed" });
     },
     [actionMutation]
   );
+
+  React.useEffect(() => {
+    if (!detail || deepLinkAppliedRef.current) {
+      return;
+    }
+    const url = new URL(window.location.href);
+    const t = url.searchParams.get("t");
+    if (t !== null) {
+      const n = Number(t);
+      if (Number.isFinite(n) && n >= 0) {
+        playback.seek(n);
+      }
+    }
+    const f = url.searchParams.get("flag");
+    if (f && f.length > 0) {
+      focusFlag(f);
+    }
+    deepLinkAppliedRef.current = true;
+  }, [detail, playback, focusFlag]);
 
   const copyLink = React.useCallback(() => {
     const url = new URL(window.location.href);
@@ -271,6 +362,10 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable);
 
+      if (e.key === "Escape" && flagDrawerOpen) {
+        return; // handled inside the drawer
+      }
+
       if (e.code === "Space" && !typing) {
         e.preventDefault();
         playback.togglePlay();
@@ -285,13 +380,15 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
 
       if (e.key === "n" && !typing) {
         e.preventDefault();
-        noteInputRef.current?.focus();
+        setQaTab("notes");
+        setMobileTab("review");
+        window.setTimeout(() => noteInputRef.current?.focus(), 50);
         return;
       }
 
       if (e.key === "f" && !typing) {
         e.preventDefault();
-        setFlagDraft((prev) => ({ ...prev, title: prev.title || "Flag" }));
+        openFlagDrawerAtPlayhead();
         return;
       }
 
@@ -309,12 +406,8 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
         }
         e.preventDefault();
         const ix = open.findIndex((f: CallFlagItem) => f.id === selectedFlagId);
-        const next =
-          e.key === "["
-            ? open[(ix <= 0 ? open.length : ix) - 1]
-            : open[(ix + 1) % open.length];
+        const next = e.key === "[" ? open[(ix <= 0 ? open.length : ix) - 1] : open[(ix + 1) % open.length];
         if (next) {
-          setSelectedFlagId(next.id);
           onJumpToFlag(next);
         }
       }
@@ -322,7 +415,7 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [playback, detail, selectedFlagId, onJumpToFlag]);
+  }, [playback, detail, selectedFlagId, onJumpToFlag, openFlagDrawerAtPlayhead, flagDrawerOpen]);
 
   if (!detail) {
     return (
@@ -336,6 +429,27 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
   }
 
   const signedUrl = recordingQuery.data ?? null;
+
+  const qaPanelProps = {
+    detail,
+    actionMutation,
+    tab: qaTab,
+    onTabChange: setQaTab,
+    selectedFlagId,
+    onSelectFlag: setSelectedFlagId,
+    onJumpToFlag,
+    onReplayFlag,
+    onResolveFlag,
+    onNewFlag: openFlagDrawerAtPlayhead,
+    noteDraft,
+    onNoteDraftChange: setNoteDraft,
+    onSaveNoteAtTime: () => {
+      noteMutation.mutate({ body: noteDraft.trim(), startSeconds: playback.currentTime });
+    },
+    onDeleteNote: (id: string) => deleteNoteMutation.mutate(id),
+    isNoteSaving: noteMutation.isPending,
+    noteTextAreaRef: noteInputRef,
+  };
 
   return (
     <section className="flex flex-col gap-4 pb-24 lg:pb-6">
@@ -391,7 +505,7 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
             +10s
           </button>
           <span className="font-mono text-sm text-slate-200">
-            {formatTimestamp(playback.currentTime)} / {formatTimestamp(playback.duration || detail.durationSeconds)}
+            {formatTimestamp(playback.currentTime)} / {formatTimestamp(durationSeconds)}
           </span>
           <label className="flex items-center gap-2 text-xs text-slate-400">
             <span>Speed</span>
@@ -420,11 +534,7 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-slate-300">
-            <input
-              type="checkbox"
-              checked={autoFollow}
-              onChange={(e) => setAutoFollow(e.target.checked)}
-            />
+            <input type="checkbox" checked={autoFollow} onChange={(e) => setAutoFollow(e.target.checked)} />
             Follow playback
           </label>
         </div>
@@ -434,9 +544,22 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
             ref={searchInputRef}
             value={transcriptQuery}
             onChange={(e) => setTranscriptQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                goToSearchHit(e.shiftKey ? -1 : 1);
+              }
+            }}
             placeholder="Search transcript (press /)"
             className="min-w-[200px] flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-violet-500"
           />
+          <span className="min-w-[3.5rem] text-center font-mono text-xs text-slate-400">
+            {transcriptQuery.trim().length === 0
+              ? ""
+              : searchMatches.length === 0
+                ? "0/0"
+                : `${String(searchMatchIndex + 1)}/${String(searchMatches.length)}`}
+          </span>
           <button
             type="button"
             onClick={() => goToSearchHit(-1)}
@@ -463,39 +586,28 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
         </div>
       </header>
 
-      <div className="lg:grid lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_minmax(0,340px)] lg:gap-4 lg:items-start">
-        <aside className="mb-4 hidden lg:block space-y-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Jump</p>
-            <ul className="mt-3 space-y-2 text-sm">
-              {detail.aiMoments.slice(0, 12).map((m: CallAiMoment) => (
-                <li key={m.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const t = m.start ?? 0;
-                      playback.seek(t);
-                      setScrollRequest({ segmentId: detail.transcriptSegments[0]?.id ?? "", nonce: Date.now() });
-                    }}
-                    className="w-full text-left text-xs text-violet-300 hover:text-violet-200"
-                  >
-                    {m.reason || m.text.slice(0, 48)}
-                  </button>
-                </li>
-              ))}
-              {detail.aiMoments.length === 0 && <li className="text-xs text-slate-500">No AI moments.</li>}
-            </ul>
-          </div>
+      <div className="lg:grid lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_minmax(0,360px)] lg:gap-4 lg:items-start">
+        <aside className="mb-4 hidden lg:block lg:sticky lg:top-4">
+          <CallOutline
+            moments={detail.aiMoments}
+            currentTime={playback.currentTime}
+            onJumpToMoment={(m) => {
+              const t = m.start ?? 0;
+              playback.seek(t);
+              setAutoFollow(true);
+              setScrollRequest({ rowId: findRowIdAtTime(t), nonce: Date.now() });
+            }}
+          />
         </aside>
 
         <div className="flex min-h-0 flex-col gap-4">
           <WaveformPanel
             audioRef={playback.audioRef}
             signedUrl={signedUrl}
-            durationSeconds={playback.duration || detail.durationSeconds}
+            durationSeconds={durationSeconds}
             flags={detail.flags}
             onFlagRegionClick={(id) => {
-              setSelectedFlagId(id);
+              focusFlag(id);
               const flag = detail.flags.find((f: CallFlagItem) => f.id === id);
               if (flag && flag.startSeconds != null) {
                 playback.seek(flag.startSeconds);
@@ -510,6 +622,26 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
               Recording source unavailable or expired. Transcript review still works.
             </p>
           )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">View</span>
+              <div className="inline-flex rounded-lg border border-slate-700 p-0.5">
+                {TRANSCRIPT_MODES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
+                      mode === m ? "bg-violet-600 text-white" : "text-slate-300 hover:text-white"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
           <div className="mb-2 flex gap-2 lg:hidden">
             <button
@@ -533,91 +665,40 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
           </div>
 
           <div className={mobileTab === "transcript" ? "block" : "hidden lg:block"}>
-            <TranscriptPane
-              segments={detail.transcriptSegments}
+            <TranscriptView
+              mode={mode}
+              rows={rows}
               searchQuery={transcriptQuery}
-              activeSegmentId={activeSegmentId}
+              activeRowId={activeRowId}
               autoFollow={autoFollow}
               onAutoFollowChange={setAutoFollow}
-              onSeekToSegment={onSeekToSegment}
+              onSeekToRow={onSeekToRow}
+              onFlagRow={onFlagRow}
+              onNoteRow={onNoteRow}
               scrollContainerRef={transcriptScrollRef}
               scrollRequest={scrollRequest}
             />
           </div>
 
           <div className={mobileTab === "review" ? "block lg:hidden" : "hidden"}>
-            <CallReviewRightRail
-              detail={detail}
-              actionMutation={actionMutation}
-              selectedFlagId={selectedFlagId}
-              onSelectFlag={setSelectedFlagId}
-              onJumpToFlag={onJumpToFlag}
-              onReplayFlag={onReplayFlag}
-              onResolveFlag={onResolveFlag}
-              noteDraft={noteDraft}
-              onNoteDraftChange={setNoteDraft}
-              onSaveNoteAtTime={() => {
-                noteMutation.mutate({
-                  body: noteDraft.trim(),
-                  startSeconds: playback.currentTime,
-                });
-              }}
-              onDeleteNote={(id) => deleteNoteMutation.mutate(id)}
-              isNoteSaving={noteMutation.isPending}
-              flagDraft={flagDraft}
-              onFlagDraftChange={setFlagDraft}
-              onCreateManualFlag={() => {
-                createFlagMutation.mutate({
-                  flagCategory: flagDraft.flagCategory,
-                  severity: flagDraft.severity,
-                  title: flagDraft.title.trim(),
-                  description: flagDraft.description.trim() || undefined,
-                  startSeconds: playback.currentTime,
-                  endSeconds: Math.min(playback.currentTime + 4, playback.duration || detail.durationSeconds),
-                });
-              }}
-              isFlagSaving={createFlagMutation.isPending}
-              noteTextAreaRef={noteInputRef}
-            />
+            <QaPanel {...qaPanelProps} />
           </div>
         </div>
 
-        <div className="hidden lg:block">
-          <CallReviewRightRail
-            detail={detail}
-            actionMutation={actionMutation}
-            selectedFlagId={selectedFlagId}
-            onSelectFlag={setSelectedFlagId}
-            onJumpToFlag={onJumpToFlag}
-            onReplayFlag={onReplayFlag}
-            onResolveFlag={onResolveFlag}
-            noteDraft={noteDraft}
-            onNoteDraftChange={setNoteDraft}
-            onSaveNoteAtTime={() => {
-              noteMutation.mutate({
-                body: noteDraft.trim(),
-                startSeconds: playback.currentTime,
-              });
-            }}
-            onDeleteNote={(id) => deleteNoteMutation.mutate(id)}
-            isNoteSaving={noteMutation.isPending}
-            flagDraft={flagDraft}
-            onFlagDraftChange={setFlagDraft}
-            onCreateManualFlag={() => {
-              createFlagMutation.mutate({
-                flagCategory: flagDraft.flagCategory,
-                severity: flagDraft.severity,
-                title: flagDraft.title.trim(),
-                description: flagDraft.description.trim() || undefined,
-                startSeconds: playback.currentTime,
-                endSeconds: Math.min(playback.currentTime + 4, playback.duration || detail.durationSeconds),
-              });
-            }}
-            isFlagSaving={createFlagMutation.isPending}
-            noteTextAreaRef={noteInputRef}
-          />
+        <div className="hidden lg:block lg:sticky lg:top-4">
+          <QaPanel {...qaPanelProps} />
         </div>
       </div>
+
+      <FlagDrawer
+        open={flagDrawerOpen}
+        anchor={flagAnchor}
+        draft={flagDraft}
+        onDraftChange={setFlagDraft}
+        onClose={() => setFlagDrawerOpen(false)}
+        onSubmit={submitFlag}
+        isSaving={createFlagMutation.isPending}
+      />
 
       <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-800 bg-slate-950/95 p-3 lg:hidden">
         <div className="mx-auto flex max-w-lg items-center justify-between gap-3">
@@ -629,14 +710,14 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
             {playback.isPlaying ? "Pause" : "Play"}
           </button>
           <span className="font-mono text-xs text-slate-200">
-            {formatTimestamp(playback.currentTime)} / {formatTimestamp(playback.duration || detail.durationSeconds)}
+            {formatTimestamp(playback.currentTime)} / {formatTimestamp(durationSeconds)}
           </span>
           <button
             type="button"
-            onClick={() => setMobileTab("review")}
+            onClick={() => setMobileTab((t) => (t === "review" ? "transcript" : "review"))}
             className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200"
           >
-            Review
+            {mobileTab === "review" ? "Transcript" : "Review"}
           </button>
         </div>
       </div>

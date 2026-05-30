@@ -1,0 +1,331 @@
+import * as React from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import type { TranscriptRow } from "./groupTranscriptSegments";
+import { findAllMatchPositions, splitTextByRanges } from "./searchHelpers";
+import { formatTimestamp } from "./formatTime";
+
+export type TranscriptMode = "compact" | "conversation" | "raw";
+
+interface Props {
+  mode: TranscriptMode;
+  rows: TranscriptRow[];
+  searchQuery: string;
+  activeRowId: string | null;
+  autoFollow: boolean;
+  onAutoFollowChange: (next: boolean) => void;
+  onSeekToRow: (row: TranscriptRow) => void;
+  onFlagRow: (row: TranscriptRow) => void;
+  onNoteRow: (row: TranscriptRow) => void;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  scrollRequest: { rowId: string; nonce: number } | null;
+}
+
+/**
+ * Virtualized transcript renderer shared by all view modes:
+ * - compact: dense timestamp-gutter + speaker + grouped text
+ * - conversation: chat-style bubbles, sided by speaker
+ * - raw: original ASR segment boundaries with start–end ranges (debug)
+ *
+ * Active row, search highlighting, click-to-seek, follow-playback, and per-row
+ * hover actions (flag / note / copy) work identically across modes.
+ */
+export function TranscriptView({
+  mode,
+  rows,
+  searchQuery,
+  activeRowId,
+  autoFollow,
+  onAutoFollowChange,
+  onSeekToRow,
+  onFlagRow,
+  onNoteRow,
+  scrollContainerRef,
+  scrollRequest,
+}: Props) {
+  const rowRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const indexById = React.useMemo(() => {
+    const map = new Map<string, number>();
+    rows.forEach((row, index) => map.set(row.id, index));
+    return map;
+  }, [rows]);
+
+  // For conversation mode: assign the first two distinct speakers to opposite
+  // sides so the agent/customer flow reads like a chat. Robust to unknown or
+  // many speakers (extras default to the left).
+  const speakerSide = React.useMemo(() => {
+    const map = new Map<string, "left" | "right">();
+    for (const row of rows) {
+      if (!map.has(row.speaker)) {
+        map.set(row.speaker, map.size === 1 ? "right" : "left");
+      }
+    }
+    return map;
+  }, [rows]);
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => (mode === "conversation" ? 80 : 56),
+    overscan: 10,
+  });
+
+  // Row heights change between modes; reset the measurement cache so the
+  // virtualizer re-measures instead of trusting stale heights.
+  React.useEffect(() => {
+    virtualizer.measure();
+  }, [mode, virtualizer]);
+
+  const scrollToRow = React.useCallback(
+    (rowId: string) => {
+      const index = indexById.get(rowId);
+      if (index == null) {
+        return;
+      }
+      const reduce =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const el = rowRefs.current.get(rowId);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+      } else {
+        virtualizer.scrollToIndex(index, { align: "center" });
+      }
+    },
+    [indexById, virtualizer]
+  );
+
+  React.useEffect(() => {
+    if (!autoFollow || !activeRowId) {
+      return;
+    }
+    scrollToRow(activeRowId);
+  }, [activeRowId, autoFollow, scrollToRow]);
+
+  React.useEffect(() => {
+    if (!scrollRequest) {
+      return;
+    }
+    scrollToRow(scrollRequest.rowId);
+  }, [scrollRequest, scrollToRow]);
+
+  const onScrollContainer = () => {
+    if (autoFollow) {
+      onAutoFollowChange(false);
+    }
+  };
+
+  const copyRow = (row: TranscriptRow) => {
+    const ts = row.start != null ? `${formatTimestamp(row.start)} ` : "";
+    void navigator.clipboard.writeText(`${ts}${row.speaker}: ${row.text}`);
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-slate-800 bg-slate-950/30">
+      <div
+        ref={scrollContainerRef}
+        onScroll={onScrollContainer}
+        className="min-h-[280px] flex-1 overflow-y-auto px-1.5 py-2 lg:min-h-[460px]"
+      >
+        {rows.length === 0 ? (
+          <p className="px-3 py-6 text-sm text-slate-500">No transcript available for this call.</p>
+        ) : (
+          <div
+            style={{
+              height: `${String(virtualizer.getTotalSize())}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              if (!row) {
+                return null;
+              }
+
+              const isActive = row.id === activeRowId;
+              const q = searchQuery.trim();
+              const ranges = q.length > 0 ? findAllMatchPositions(row.text, q) : [];
+              const parts = splitTextByRanges(row.text, ranges);
+              const side = speakerSide.get(row.speaker) ?? "left";
+
+              return (
+                <div
+                  key={row.id}
+                  data-index={virtualRow.index}
+                  data-row-id={row.id}
+                  ref={(node) => {
+                    if (node) {
+                      rowRefs.current.set(row.id, node);
+                      virtualizer.measureElement(node);
+                    } else {
+                      rowRefs.current.delete(row.id);
+                    }
+                  }}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${String(virtualRow.start)}px)`,
+                  }}
+                  className="group relative"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSeekToRow(row)}
+                    title={row.start != null ? formatTimestamp(row.start) : undefined}
+                    className="block w-full text-left"
+                  >
+                    {mode === "conversation" ? (
+                      <ConversationRow row={row} parts={parts} isActive={isActive} side={side} />
+                    ) : mode === "raw" ? (
+                      <RawRow row={row} parts={parts} isActive={isActive} />
+                    ) : (
+                      <CompactRow row={row} parts={parts} isActive={isActive} />
+                    )}
+                  </button>
+
+                  <div className="absolute right-1 top-1 z-10 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                    <RowAction label="Flag" onClick={() => onFlagRow(row)} />
+                    <RowAction label="Note" onClick={() => onNoteRow(row)} />
+                    <RowAction label="Copy" onClick={() => copyRow(row)} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Highlighted({ rowId, parts }: { rowId: string; parts: Array<{ type: "plain" | "hit"; text: string }> }) {
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.type === "hit" ? (
+          <mark key={`${rowId}-p-${String(i)}`} className="rounded bg-amber-400/30 text-amber-50">
+            {part.text}
+          </mark>
+        ) : (
+          <React.Fragment key={`${rowId}-p-${String(i)}`}>{part.text}</React.Fragment>
+        )
+      )}
+    </>
+  );
+}
+
+function CompactRow({
+  row,
+  parts,
+  isActive,
+}: {
+  row: TranscriptRow;
+  parts: Array<{ type: "plain" | "hit"; text: string }>;
+  isActive: boolean;
+}) {
+  return (
+    <div
+      className={`relative flex gap-3 rounded-md py-1.5 pl-3 pr-2 transition-colors ${
+        isActive ? "bg-violet-500/10" : "group-hover:bg-slate-800/40"
+      }`}
+    >
+      {isActive && (
+        <span aria-hidden="true" className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-violet-400" />
+      )}
+      <span
+        className={`mt-px w-10 shrink-0 font-mono text-[11px] leading-6 tabular-nums ${
+          isActive ? "text-violet-300" : "text-slate-500"
+        }`}
+      >
+        {row.start != null ? formatTimestamp(row.start) : "—"}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span
+          className={`mr-2 align-baseline text-[10px] font-semibold uppercase tracking-wider ${
+            isActive ? "text-violet-300" : "text-slate-400"
+          }`}
+        >
+          {row.speaker}
+        </span>
+        <span className="align-baseline text-sm leading-6 text-slate-200">
+          <Highlighted rowId={row.id} parts={parts} />
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function ConversationRow({
+  row,
+  parts,
+  isActive,
+  side,
+}: {
+  row: TranscriptRow;
+  parts: Array<{ type: "plain" | "hit"; text: string }>;
+  isActive: boolean;
+  side: "left" | "right";
+}) {
+  return (
+    <div className={`flex px-1 py-1 ${side === "right" ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`max-w-[88%] rounded-2xl px-3 py-2 transition-colors ${
+          side === "right" ? "bg-sky-950/40" : "bg-slate-800/50"
+        } ${isActive ? "ring-1 ring-violet-400" : ""}`}
+      >
+        <div className="flex items-baseline gap-2 text-[10px]">
+          <span className="font-semibold uppercase tracking-wider text-slate-400">{row.speaker}</span>
+          {row.start != null && <span className="font-mono text-slate-500">{formatTimestamp(row.start)}</span>}
+        </div>
+        <p className="mt-1 text-sm leading-6 text-slate-200">
+          <Highlighted rowId={row.id} parts={parts} />
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RawRow({
+  row,
+  parts,
+  isActive,
+}: {
+  row: TranscriptRow;
+  parts: Array<{ type: "plain" | "hit"; text: string }>;
+  isActive: boolean;
+}) {
+  const range =
+    row.start != null
+      ? row.end != null
+        ? `${formatTimestamp(row.start)}–${formatTimestamp(row.end)}`
+        : formatTimestamp(row.start)
+      : "—";
+  return (
+    <div
+      className={`flex gap-3 rounded px-2 py-1 font-mono text-xs transition-colors ${
+        isActive ? "bg-violet-500/10" : "group-hover:bg-slate-800/40"
+      }`}
+    >
+      <span className={`w-24 shrink-0 tabular-nums ${isActive ? "text-violet-300" : "text-slate-500"}`}>{range}</span>
+      <span className="min-w-0 flex-1 text-slate-300">
+        <span className="text-slate-500">{row.speaker}: </span>
+        <Highlighted rowId={row.id} parts={parts} />
+      </span>
+    </div>
+  );
+}
+
+function RowAction({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-md border border-slate-700 bg-slate-900/90 px-1.5 py-0.5 text-[10px] font-medium text-slate-200 shadow-sm hover:bg-slate-800"
+    >
+      {label}
+    </button>
+  );
+}
