@@ -3,7 +3,7 @@ import type { Database, Json, TablesInsert } from "../../supabase/types";
 import { insertAuditLog, slugify, type IntegrationProvider } from "../lib/app-data";
 import { getPublicIntegrationRingbaConfig } from "../lib/integration-config";
 import { enqueueAiJob } from "./ai-jobs";
-import { createHmacSha256Hex, getHeaderValue, safeEqualText } from "./netlify-request";
+import { createHmacSha256Hex, createSha256Hex, getHeaderValue, safeEqualText } from "./netlify-request";
 
 type SupabaseAny = SupabaseClient<Database>;
 
@@ -224,27 +224,28 @@ export async function loadIntegrationContext(client: SupabaseAny, integrationId:
 }
 
 export async function loadIntegrationContextByRingbaPublicIngestKey(client: SupabaseAny, publicIngestKey: string) {
+  // Look the integration up by an indexed equality on the SHA-256 hash of the
+  // ingest key (see migration 0014). This is O(1), returns at most one row, and
+  // performs no per-tenant plaintext comparison — replacing the previous O(n)
+  // scan with a non-timing-safe `===`. An empty/blank key can never match a
+  // non-null stored hash, so short-circuit it.
+  if (!publicIngestKey) {
+    return null;
+  }
+
+  const keyHash = createSha256Hex(publicIngestKey);
   const result = await client
     .from("integrations")
     .select("id, organization_id, provider, display_name, config")
-    .eq("provider", "ringba");
+    .eq("provider", "ringba")
+    .eq("public_ingest_key_hash", keyHash)
+    .maybeSingle();
 
   if (result.error) {
     throw new Error(result.error.message);
   }
 
-  for (const row of (result.data ?? []) as Array<Record<string, unknown>>) {
-    const integration = toIntegrationRecord(row);
-    if (!integration) {
-      continue;
-    }
-
-    if (getPublicIntegrationRingbaConfig(integration.config).publicIngestKey === publicIngestKey) {
-      return integration;
-    }
-  }
-
-  return null;
+  return toIntegrationRecord((result.data ?? null) as Record<string, unknown> | null);
 }
 
 function requireQueryValue(searchParams: URLSearchParams, key: string) {

@@ -58,3 +58,11 @@ export function safeEqualText(left: string, right: string) {
 export function createHmacSha256Hex(secret: string, payload: string) {
   return crypto.createHmac("sha256", secret).update(payload, "utf8").digest("hex");
 }
+
+// SHA-256 hex of a value. Matches Postgres `encode(digest(value,'sha256'),'hex')`
+// so a hash computed here equals the `integrations.public_ingest_key_hash`
+// generated column — letting the Ringba pixel handler look an integration up by
+// an indexed hash equality instead of scanning + comparing plaintext keys.
+export function createSha256Hex(value: string) {
+  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}

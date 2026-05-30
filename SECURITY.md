@@ -27,7 +27,7 @@ Report suspected vulnerabilities or data-exposure issues privately to the engine
 
 - App API routes require an authenticated session resolved to an active organization (`requireApiSession`).
 - Protected Netlify functions authenticate with a shared-secret header compared in constant time (`src/server/netlify-request.ts`); the Stripe webhook verifies the `stripe-signature`; integration webhooks support shared-secret or HMAC-SHA256 (see [docs/integrations.md](docs/integrations.md)).
-- The Ringba pixel currently authenticates via a query-string `api_key` — a tracked weakness (easier to leak via logs/referrers). Prefer header/HMAC auth for new providers.
+- The Ringba pixel authenticates via a query-string ingest key. As of migration `0014` the handler resolves the integration by an **indexed SHA-256 hash** of the key (`integrations.public_ingest_key_hash`, a generated column) — no O(n) tenant scan and no plaintext comparison. The key is still carried in the URL (inherent to an image pixel, so easier to leak via logs/referrers than a header); treat it as a rotatable secret and prefer header/HMAC auth for new providers.
 
 ## Input validation
 
@@ -47,6 +47,6 @@ The [current readiness snapshot](docs/status-2026-05-29.md) tracks security-rele
 
 **Resolved (Phase 4, 2026-05-29):** protected server auth no longer trusts an unverified cookie session. The middleware validates every request with `supabase.auth.getUser()` (which verifies the JWT against the Auth server, rejecting revoked/deleted/expired users) and stores the verified user in `locals.user`; `requireAppSession` (pages) and `requireApiSession` (API routes) derive identity from `locals.user`, not `getSession()`. Session-resolution tests cover no-user, no-email, no-org, active-org-not-a-member, and multiple-org cases.
 
-**Still open:** Supabase Auth leaked-password protection (a dashboard toggle — enable in Authentication → Providers); Ringba pixel / scheduled-function hardening (Phase 5). Accepted/expected advisor flags: `rls_enabled_no_policy` on the two deny-all tables, `extension_in_public` for `citext`, and `authenticated`-executable `SECURITY DEFINER` on the RLS helper functions + onboarding RPC (all required). Factor the open items in before unrestricted production use.
+**Still open:** Supabase Auth leaked-password protection (a dashboard toggle — enable in Authentication → Providers); scheduled-function endpoint auth (Phase 5 PR2). The Ringba pixel ingest lookup was hardened in PR1 (`0014`, indexed hash lookup); app-level pixel rate-limiting is intentionally deferred to the platform WAF. Accepted/expected advisor flags: `rls_enabled_no_policy` on the two deny-all tables, `extension_in_public` for `citext`, and `authenticated`-executable `SECURITY DEFINER` on the RLS helper functions + onboarding RPC (all required). Factor the open items in before unrestricted production use.
 
 **Invariant (wallet ledger):** any code that inserts `wallet_ledger_entries` must first lock the corresponding `billing_accounts` row (`SELECT … FOR UPDATE`), as `apply_stripe_recharge_event` does. The running balance is derived from the latest ledger row, so an unlocked writer could reintroduce a lost-update race.

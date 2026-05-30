@@ -34,12 +34,12 @@ Auth config resolution falls back across `webhookAuth.*`, legacy `sharedSecret`/
 
 A `GET` endpoint (POST returns 405). It:
 
-1. Reads the `api_key` query param and resolves the integration via `loadIntegrationContextByRingbaPublicIngestKey`.
+1. Reads the `api_key` query param and resolves the integration via `loadIntegrationContextByRingbaPublicIngestKey` — an **indexed equality on the SHA-256 hash** of the key (`integrations.public_ingest_key_hash`, a generated column from migration `0014`), so the lookup is O(1) and does no plaintext per-tenant comparison.
 2. Parses Ringba query params (call id, duration, campaign/publisher names, caller number, recording URL, timestamps in several formats).
 3. Enforces a **minimum call duration** (`integrations.config.minimumDurationSeconds`, default 30s) — shorter calls are recorded as a `pixel.skipped` event and dropped.
 4. Records `pixel.rejected` / `pixel.skipped` / accepted events in `integration_events`.
 
-> **Note:** the pixel uses a query-string `api_key`, which is easier to leak via logs/referrers than a header. This is a tracked risk in [`docs/status-2026-04-13.md`](status-2026-04-13.md); prefer header-based auth for new providers.
+> **Note:** the key is matched by an indexed hash (migration `0014`), but it is still carried in the URL (inherent to an image pixel), which is easier to leak via logs/referrers than a header. Treat it as a rotatable secret; prefer header-based auth for new providers. App-level rate-limiting is intentionally deferred to the platform WAF.
 
 ## Ringba API sync
 

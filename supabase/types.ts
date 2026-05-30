@@ -1137,6 +1137,7 @@ export type Database = {
           mode: Database["public"]["Enums"]["source_kind"]
           organization_id: string
           provider: Database["public"]["Enums"]["integration_provider"]
+          public_ingest_key_hash: string | null
           status: Database["public"]["Enums"]["integration_status"]
           updated_at: string
         }
@@ -1150,6 +1151,7 @@ export type Database = {
           mode?: Database["public"]["Enums"]["source_kind"]
           organization_id: string
           provider: Database["public"]["Enums"]["integration_provider"]
+          public_ingest_key_hash?: string | null
           status?: Database["public"]["Enums"]["integration_status"]
           updated_at?: string
         }
@@ -1163,6 +1165,7 @@ export type Database = {
           mode?: Database["public"]["Enums"]["source_kind"]
           organization_id?: string
           provider?: Database["public"]["Enums"]["integration_provider"]
+          public_ingest_key_hash?: string | null
           status?: Database["public"]["Enums"]["integration_status"]
           updated_at?: string
         }
