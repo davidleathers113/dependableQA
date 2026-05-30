@@ -24,3 +24,37 @@ jobs:
 
       - name: Verify project
         run: npm run ci:verify
+
+  db-tests:
+    # DB-level RLS + Stripe-concurrency + Ringba-ingest tests against real
+    # Postgres. Excluded from ci:verify (CI's verify job has no database); run
+    # here on the Supabase CLI stack, which applies all migrations on start.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase (applies migrations to a local Postgres)
+        run: supabase start
+
+      - name: Run DB-level tests
+        run: npm run test:db
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop

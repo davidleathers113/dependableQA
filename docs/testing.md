@@ -39,7 +39,7 @@ The default Vitest run mocks the Supabase client, so it proves *app-side* `.eq("
 - `tests/db/rls-tenant-isolation.test.ts` — seeds two orgs with members across every role (owner/admin/reviewer/analyst/billing) plus calls, flags, review notes, billing, integrations, an `ai_jobs` row, and a `processed_stripe_events` row, then asserts RLS behaviour as `anon` / `authenticated` (per `auth.uid()`) / `service_role`: cross-org reads and writes are denied, role-scoped writes are enforced, `ai_jobs` and `processed_stripe_events` are invisible to `anon`/`authenticated` (service-role-only deny-all), and `service_role` bypasses RLS (which is *why* admin-client paths must filter `organization_id`).
 - `tests/db/stripe-recharge.test.ts` — drives `apply_stripe_recharge_event` against real Postgres: duplicate event id → applied once then no-op (one ledger row), concurrent same id → exactly one credit, concurrent distinct ids → serialized with no lost update, billing-account/organization mismatch → clean failure with no partial state, and EXECUTE granted only to `service_role`.
 
-These are **excluded from `npm test` and the release gate** (`vitest.config.ts` excludes `tests/db/**`) because CI has no Postgres. Run them on demand:
+These are **excluded from `npm test` and the release gate** (`vitest.config.ts` excludes `tests/db/**`) because the `verify` job has no database. They run in a **dedicated `db-tests` CI job** (`.github/workflows/ci.yml`) that boots the Supabase CLI stack (`supabase start`, which applies all migrations) and runs `npm run test:db`. Run them locally the same way:
 
 ```bash
 supabase start            # one-time per session; boots local Postgres on :54322
