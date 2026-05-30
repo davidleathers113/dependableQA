@@ -32,6 +32,8 @@ which is `check:env-example` → `check:migrations` → `test` → `build` (`ast
 | `ai-dispatch-scheduled` | `*/2 * * * *` | Drains the AI job queue (transcription + analysis) |
 | `ringba-api-sync-scheduled` | `*/5 * * * *` | Polls the Ringba call-logs API |
 
+These carry no endpoint auth by design: [Netlify scheduled functions can't be invoked via a URL](https://docs.netlify.com/build/functions/scheduled-functions/) — they only run on their schedule (Netlify POSTs a `{ next_run }` body), so they are not a public HTTP surface in production. Adding an app-level secret would risk breaking the cron (the scheduler can't send our header) for no gain. Behavior is covered by `tests/netlify/scheduled-functions.test.ts`, and the underlying `ringba-api-sync.ts` by `src/server/ringba-api-sync.test.ts`.
+
 ## Protected / webhook functions
 
 Each verifies a shared secret (timing-safe compare via `src/server/netlify-request.ts`) or a provider signature:
@@ -62,6 +64,6 @@ Set runtime config in the Netlify UI per context (Production / Deploy Preview). 
 
 ## Known operational risks
 
-Tracked in [`docs/status-2026-05-29.md`](status-2026-05-29.md) (supersedes the [April snapshot](status-2026-04-13.md)). The Phase 1–4 blockers are now resolved: Stripe webhook credit idempotency (transactional RPC), atomic import-batch claiming + CSV dedupe, DB-level RLS proof for the service-role-heavy paths, and protected server auth now using verified `getUser()` instead of `getSession()`. Remaining: Ringba pixel / scheduled-function auth (Phase 5) and browser e2e (Phase 6).
+Tracked in [`docs/status-2026-05-29.md`](status-2026-05-29.md) (supersedes the [April snapshot](status-2026-04-13.md)). The Phase 1–4 blockers are now resolved: Stripe webhook credit idempotency (transactional RPC), atomic import-batch claiming + CSV dedupe, DB-level RLS proof for the service-role-heavy paths, and protected server auth now using verified `getUser()` instead of `getSession()`. Remaining: browser e2e (Phase 6). (Phase 5 hardened the Ringba pixel ingest lookup and added scheduled-function/sync test coverage; scheduled functions are not publicly HTTP-invokable, so they need no endpoint auth.)
 
 **Migration drift** is a process risk, not a code risk: there is no automated migration apply (see the warning under [The release gate](#the-release-gate)). Follow the [release checklist](releasing.md) so committed migrations are actually applied to the target database.
