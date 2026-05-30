@@ -153,22 +153,38 @@ function extensionFromPath(pathName: string): string | null {
 }
 
 /**
- * Resolve a supported audio extension, trusting magic bytes first (the only
+ * Best-effort audio-format detection, trusting magic bytes first (the only
  * signal that survives a mislabeled S3 object), then the content-type header,
- * then the final URL path. Throws — never returns a placeholder — when the
- * format cannot be identified, so OpenAI is never handed an unusable file.
+ * then the URL path. Returns null when the format cannot be identified — callers
+ * that must have a format use `resolveAudioExtension`; the preflight uses this to
+ * classify `not_audio` without throwing.
  */
-export function resolveAudioExtension(bytes: Uint8Array, contentType: string, finalUrlPath: string): string {
+export function detectAudioExtension(
+  bytes: Uint8Array,
+  contentType: string,
+  finalUrlPath: string
+): string | null {
   return (
     extensionFromMagicBytes(bytes) ??
     extensionFromContentType(contentType) ??
     extensionFromPath(finalUrlPath) ??
-    (() => {
-      throw createNonRetryableError(
-        "Could not determine a supported audio format for the recording (no magic-byte, content-type, or filename signal)."
-      );
-    })()
+    null
   );
+}
+
+/**
+ * Resolve a supported audio extension. Throws — never returns a placeholder —
+ * when the format cannot be identified, so OpenAI is never handed an unusable
+ * file.
+ */
+export function resolveAudioExtension(bytes: Uint8Array, contentType: string, finalUrlPath: string): string {
+  const detected = detectAudioExtension(bytes, contentType, finalUrlPath);
+  if (!detected) {
+    throw createNonRetryableError(
+      "Could not determine a supported audio format for the recording (no magic-byte, content-type, or filename signal)."
+    );
+  }
+  return detected;
 }
 
 export function mimeForExtension(extension: string): string {

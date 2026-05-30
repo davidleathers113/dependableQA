@@ -36,6 +36,15 @@ interface AnalyzeResult {
   skipped: Array<{ callId: string; reason: string }>;
 }
 
+interface RecordingReadinessItem {
+  callId: string;
+  status: string;
+}
+
+function readinessLabel(status: string): string {
+  return status.split("_").join(" ");
+}
+
 interface Props {
   integration: IntegrationCard;
   canManage: boolean;
@@ -62,6 +71,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
   const [notice, setNotice] = React.useState("");
   const [result, setResult] = React.useState<ImportResult | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [readiness, setReadiness] = React.useState<Record<string, number> | null>(null);
 
   const disabled = !canManage || !integration.isConfigured || !integration.ringba.apiTokenConfigured;
 
@@ -124,6 +134,36 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
     },
     onError: (error) => {
       setFormError(error instanceof Error ? error.message : "Unable to queue analysis.");
+    },
+  });
+
+  const verifyMutation = useMutation({
+    mutationFn: async (callIds: string[]): Promise<RecordingReadinessItem[]> => {
+      const response = await fetch("/api/calls/verify-recording", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ callIds }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        results?: RecordingReadinessItem[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to check recordings.");
+      }
+      return payload.results ?? [];
+    },
+    onSuccess: (results) => {
+      const counts: Record<string, number> = {};
+      for (const item of results) {
+        counts[item.status] = (counts[item.status] ?? 0) + 1;
+      }
+      setReadiness(counts);
+      setFormError("");
+    },
+    onError: (error) => {
+      setReadiness(null);
+      setFormError(error instanceof Error ? error.message : "Unable to check recordings.");
     },
   });
 
@@ -335,7 +375,26 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
                 </span>
               </div>
 
+              {readiness ? (
+                <p className="text-xs text-slate-300">
+                  Recording readiness —{" "}
+                  {Object.entries(readiness)
+                    .map(([status, count]) => `${count} ${readinessLabel(status)}`)
+                    .join(", ")}
+                  .
+                </p>
+              ) : null}
+
               <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => verifyMutation.mutate(selectedIds.length > 0 ? selectedIds : result.callIds)}
+                  disabled={!canManage || verifyMutation.isPending || result.callIds.length === 0}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-sky-500/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <DownloadCloud className="h-4 w-4" />
+                  {verifyMutation.isPending ? "Checking…" : "Check recordings"}
+                </button>
                 <button
                   type="button"
                   onClick={() => analyzeMutation.mutate(selectedIds)}

@@ -1,14 +1,18 @@
 import type { APIRoute } from "astro";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { canSpendAi } from "../../../lib/auth/ai-spend-roles";
 import { requireApiSession } from "../../../lib/auth/request-session";
 import { getAdminSupabase } from "../../../lib/supabase/admin-client";
-import {
-  analyzeSelectedInputSchema,
-  enqueueAnalysisForCalls,
-} from "../../../server/analyze-selection";
+import { PREFLIGHT_MAX_BATCH, verifyRecordings } from "../../../server/recording-preflight";
 
 export const prerender = false;
+
+const verifyRecordingInputSchema = z.object({
+  callIds: z
+    .array(z.string().min(1))
+    .min(1, "callIds must contain at least one call id.")
+    .max(PREFLIGHT_MAX_BATCH, `A preflight request may check at most ${PREFLIGHT_MAX_BATCH} calls.`),
+});
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -24,7 +28,7 @@ export const POST: APIRoute = async (context) => {
   }
 
   if (!canSpendAi(session.organization.role)) {
-    return json({ error: "Your role cannot queue AI analysis." }, 403);
+    return json({ error: "Your role cannot check recordings for analysis." }, 403);
   }
 
   const rawBody = await context.request.json().catch(() => null);
@@ -34,7 +38,7 @@ export const POST: APIRoute = async (context) => {
 
   let input;
   try {
-    input = analyzeSelectedInputSchema.parse(rawBody);
+    input = verifyRecordingInputSchema.parse(rawBody);
   } catch (error) {
     if (error instanceof ZodError) {
       return json({ error: error.issues[0]?.message ?? "Invalid request." }, 400);
@@ -43,17 +47,14 @@ export const POST: APIRoute = async (context) => {
   }
 
   try {
-    const result = await enqueueAnalysisForCalls(getAdminSupabase(), {
+    const results = await verifyRecordings(getAdminSupabase(), {
       organizationId: session.organization.id,
-      callIds: input.callIds ?? [],
-      importBatchId: input.importBatchId ?? null,
-      actorUserId: session.user.id,
+      callIds: input.callIds,
     });
-
-    return json({ ok: true, ...result });
+    return json({ ok: true, results });
   } catch (error) {
     return json(
-      { error: error instanceof Error ? error.message : "Unable to queue analysis." },
+      { error: error instanceof Error ? error.message : "Unable to check recordings." },
       400
     );
   }
