@@ -28,6 +28,8 @@ Job types: **`transcription`** then **`analysis`**. The `calls` table carries `t
 - **`claimAiJobs`** — selects `queued`/`retry_scheduled` rows and marks them `claimed`, over-fetching (`limit × 3`) then claiming up to `limit`.
 - **`runAiJobs(admin, { limit, jobType })`** — the entry point the workers call. Claims, runs, and records each job; updates the call's status columns at queued/running/failed transitions; writes an audit-log entry per job via `insertAuditLog`.
 - **Retries** — on failure, `shouldRetryJob` retries unless the error is explicitly marked `retryable: false`; `getRetryDelayMs(attemptCount)` applies a backoff and the job goes to `retry_scheduled` until `max_attempts` is exhausted, then `failed`.
+- **Leases are sized per job type** — transcription gets `TRANSCRIPTION_LEASE_MS` (20 min) vs analysis's `DEFAULT_LEASE_MS` (5 min). A transcription downloads + diarizes real call audio and can exceed 5 minutes; the longer lease stops `recoverExpiredAiJobs` from reclaiming a still-running job. An explicit `options.leaseMs` still overrides.
+- **Execution is idempotent against duplicate spend** — the queue dedupe key and the `call_transcripts`/`call_analyses` upserts prevent duplicate *rows*, but a job reclaimed mid-flight would otherwise re-call OpenAI and pay twice. So `transcribeCall` returns early when a completed transcript already exists, and `analyzeCall` returns early when an analysis at the active version already exists — neither hits OpenAI on a re-run.
 
 ## Analysis versioning
 

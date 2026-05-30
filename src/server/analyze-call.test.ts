@@ -13,7 +13,7 @@ vi.mock("../lib/openai/server-client", () => ({
 
 import { analyzeCall } from "./analyze-call";
 
-function createClient() {
+function createClient(existingAnalysis: Record<string, unknown> | null = null) {
   const insertedFlags: Array<Record<string, unknown>> = [];
   const insertedAnalyses: Array<Record<string, unknown>> = [];
   const analysisUpsertOptions: Array<Record<string, unknown> | undefined> = [];
@@ -109,6 +109,15 @@ function createClient() {
 
         if (table === "call_analyses") {
           return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  eq: vi.fn(() => ({
+                    maybeSingle: vi.fn(async () => ({ data: existingAnalysis, error: null })),
+                  })),
+                })),
+              })),
+            })),
             upsert: vi.fn(async (row: Record<string, unknown>, options?: Record<string, unknown>) => {
               insertedAnalyses.push(row);
               analysisUpsertOptions.push(options);
@@ -143,6 +152,27 @@ describe("analyzeCall", () => {
       analysisPromptVersion: "v1",
       analysisSchemaVersion: "v1",
     });
+  });
+
+  it("skips OpenAI when an analysis at the active version already exists", async () => {
+    const { client, insertedAnalyses, insertedFlags } = createClient({
+      model_name: "gpt-4.1-mini",
+      summary: "Previously analyzed.",
+      disposition_suggested: "qualified",
+      confidence: 0.81,
+      flag_summary: [{ category: "follow_up", severity: "low", title: "x" }],
+    });
+
+    const result = await analyzeCall(client as never, {
+      organizationId: "org_1",
+      callId: "call_1",
+    });
+
+    expect(result.summary).toBe("Previously analyzed.");
+    expect(result.flagCount).toBe(1);
+    expect(parseMock).not.toHaveBeenCalled();
+    expect(insertedAnalyses).toHaveLength(0);
+    expect(insertedFlags).toHaveLength(0);
   });
 
   it("stores structured analysis output and AI flags from transcript context", async () => {

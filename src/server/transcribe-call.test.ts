@@ -19,7 +19,10 @@ vi.mock("../lib/openai/server-client", () => ({
 
 import { transcribeCall } from "./transcribe-call";
 
-function createClient(callOverrides: Partial<Record<string, unknown>> = {}) {
+function createClient(
+  callOverrides: Partial<Record<string, unknown>> = {},
+  existingTranscript: Record<string, unknown> | null = null
+) {
   const transcriptWrites: Array<Record<string, unknown>> = [];
   const callUpdates: Array<Record<string, unknown>> = [];
   const uploads: Array<{ path: string; bytes: Buffer; options: Record<string, unknown> }> = [];
@@ -64,6 +67,13 @@ function createClient(callOverrides: Partial<Record<string, unknown>> = {}) {
 
         if (table === "call_transcripts") {
           return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  maybeSingle: vi.fn(async () => ({ data: existingTranscript, error: null })),
+                })),
+              })),
+            })),
             upsert: vi.fn(async (values: Record<string, unknown>) => {
               transcriptWrites.push(values);
               return { error: null };
@@ -183,6 +193,32 @@ describe("transcribeCall", () => {
     });
     expect(Object.hasOwn(callUpdates.at(-1) ?? {}, "transcription_started_at")).toBe(false);
     expect(Object.hasOwn(callUpdates.at(-1) ?? {}, "analysis_error")).toBe(false);
+  });
+
+  it("skips OpenAI and the network when a completed transcript already exists", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { client, uploads } = createClient(
+      { transcription_status: "completed" },
+      {
+        transcript_text: "Previously transcribed.",
+        transcript_segments: [{ speaker: "Agent", start: 0, end: 1, text: "Hi" }],
+        duration_seconds: 12,
+        model_name: "gpt-4o-transcribe-diarize",
+      }
+    );
+
+    const result = await transcribeCall(client as never, {
+      organizationId: "org_1",
+      callId: "call_1",
+    });
+
+    expect(result.transcriptText).toBe("Previously transcribed.");
+    expect(result.durationSeconds).toBe(12);
+    expect(transcriptionCreateMock).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(uploads).toHaveLength(0);
   });
 
   it("fails oversized recordings with a non-retryable error message", async () => {

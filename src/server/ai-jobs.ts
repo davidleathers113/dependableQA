@@ -14,6 +14,14 @@ type SupabaseAny = SupabaseClient<Database>;
 // (migration 0010) is the backstop that keeps such a reprocess from creating a
 // duplicate analysis even if a lease is mis-sized.
 const DEFAULT_LEASE_MS = 5 * 60_000;
+// Transcription downloads + diarizes real call audio and can run far longer than
+// analysis; give it a much larger lease so recoverExpiredAiJobs doesn't reclaim a
+// still-running transcription and pay OpenAI a second time.
+const TRANSCRIPTION_LEASE_MS = 20 * 60_000;
+
+function leaseMsForJobType(jobType: string) {
+  return jobType === "transcription" ? TRANSCRIPTION_LEASE_MS : DEFAULT_LEASE_MS;
+}
 
 export type AiJobType = "transcription" | "analysis";
 export type AiJobRow = Database["public"]["Tables"]["ai_jobs"]["Row"];
@@ -350,12 +358,15 @@ export async function claimAiJobs(
   }
 
   const claimed: AiJobRow[] = [];
-  const leaseExpiry = new Date(now.getTime() + (options.leaseMs ?? DEFAULT_LEASE_MS)).toISOString();
 
   for (const candidate of candidates.data ?? []) {
     if (claimed.length >= (options.limit ?? 5)) {
       break;
     }
+
+    // Size the lease per job type (an explicit options.leaseMs still wins).
+    const leaseMs = options.leaseMs ?? leaseMsForJobType(candidate.job_type);
+    const leaseExpiry = new Date(now.getTime() + leaseMs).toISOString();
 
     const claim = await client
       .from("ai_jobs")

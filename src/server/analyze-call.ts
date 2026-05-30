@@ -182,6 +182,35 @@ function parseTranscriptSegments(value: Json | null | undefined) {
   return segments;
 }
 
+/** Return an existing analysis at the given version, or null. */
+async function loadExistingAnalysis(
+  client: SupabaseAny,
+  organizationId: string,
+  callId: string,
+  analysisVersion: string
+) {
+  const result = await client
+    .from("call_analyses")
+    .select("model_name, summary, disposition_suggested, confidence, flag_summary")
+    .eq("organization_id", organizationId)
+    .eq("call_id", callId)
+    .eq("analysis_version", analysisVersion)
+    .maybeSingle();
+
+  if (result.error || !result.data) {
+    return null;
+  }
+
+  const row = result.data as Record<string, unknown>;
+  return {
+    modelName: asString(row.model_name),
+    summary: asString(row.summary),
+    suggestedDisposition: asString(row.disposition_suggested) || null,
+    confidence: asNumber(row.confidence) ?? 0,
+    flagCount: Array.isArray(row.flag_summary) ? row.flag_summary.length : 0,
+  };
+}
+
 async function loadAnalysisContext(client: SupabaseAny, organizationId: string, callId: string) {
   const [transcriptResult, callResult] = await Promise.all([
     client
@@ -310,8 +339,23 @@ export async function analyzeCall(
     preferredModel?: string | null;
   }
 ) {
-  const context = await loadAnalysisContext(client, options.organizationId, options.callId);
   const config = getOpenAiServerConfig();
+  const analysisVersion = `${config.analysisPromptVersion}:${config.analysisSchemaVersion}`;
+
+  // Idempotency: if an analysis at the active prompt/schema version already
+  // exists, a prior (or reclaimed) job already produced it. Returning early
+  // avoids re-spending on OpenAI.
+  const existingAnalysis = await loadExistingAnalysis(
+    client,
+    options.organizationId,
+    options.callId,
+    analysisVersion
+  );
+  if (existingAnalysis) {
+    return existingAnalysis;
+  }
+
+  const context = await loadAnalysisContext(client, options.organizationId, options.callId);
   const requestedModelName = asString(options.preferredModel ?? undefined) || config.analysisModel;
   const startedAt = Date.now();
   const instructions = buildAnalysisInstructions(config.analysisPromptVersion);
@@ -378,7 +422,7 @@ export async function analyzeCall(
     {
       organization_id: options.organizationId,
       call_id: options.callId,
-      analysis_version: `${config.analysisPromptVersion}:${config.analysisSchemaVersion}`,
+      analysis_version: analysisVersion,
       model_name: modelName,
       summary: parsed.summary,
       disposition_suggested: parsed.suggestedDisposition,

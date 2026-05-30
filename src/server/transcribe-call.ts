@@ -94,7 +94,7 @@ function inferDurationSeconds(
 async function loadCallForTranscription(client: SupabaseAny, organizationId: string, callId: string) {
   const result = await client
     .from("calls")
-    .select("id, organization_id, recording_url, recording_storage_path, duration_seconds")
+    .select("id, organization_id, recording_url, recording_storage_path, duration_seconds, transcription_status")
     .eq("organization_id", organizationId)
     .eq("id", callId)
     .single();
@@ -104,6 +104,33 @@ async function loadCallForTranscription(client: SupabaseAny, organizationId: str
   }
 
   return result.data as Record<string, unknown>;
+}
+
+/** Return an already-stored transcript for this call, or null if none is usable. */
+async function loadExistingTranscript(client: SupabaseAny, organizationId: string, callId: string) {
+  const result = await client
+    .from("call_transcripts")
+    .select("transcript_text, transcript_segments, duration_seconds, model_name")
+    .eq("organization_id", organizationId)
+    .eq("call_id", callId)
+    .maybeSingle();
+
+  if (result.error || !result.data) {
+    return null;
+  }
+
+  const row = result.data as Record<string, unknown>;
+  const transcriptText = asString(row.transcript_text);
+  if (!transcriptText) {
+    return null;
+  }
+
+  return {
+    transcriptText,
+    transcriptSegments: Array.isArray(row.transcript_segments) ? (row.transcript_segments as Json[]) : [],
+    durationSeconds: asNumber(row.duration_seconds) ?? 0,
+    modelName: asString(row.model_name) || getOpenAiServerConfig().transcriptionModel,
+  };
 }
 
 async function downloadRecordingFromStorage(client: SupabaseAny, storagePath: string) {
@@ -191,6 +218,17 @@ export async function transcribeCall(
   }
 ) {
   const callRow = await loadCallForTranscription(client, options.organizationId, options.callId);
+
+  // Idempotency: a completed transcript means a prior (or concurrently
+  // reclaimed) job already did the work. Return it instead of paying OpenAI
+  // again — the dedupe key/upsert prevent duplicate rows, not duplicate spend.
+  if (asString(callRow.transcription_status) === "completed") {
+    const existing = await loadExistingTranscript(client, options.organizationId, options.callId);
+    if (existing) {
+      return existing;
+    }
+  }
+
   const source = await loadRecordingSource(client, callRow);
   assertRecordingSize(source);
 
