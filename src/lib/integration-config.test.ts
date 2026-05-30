@@ -77,6 +77,19 @@ describe("integration-config", () => {
     });
   });
 
+  it("never exposes the Ringba API access token in the public config", () => {
+    const publicConfig = getPublicIntegrationRingbaConfig({
+      ringba: {
+        ringbaAccountId: "acct_1",
+        apiAccessToken: "super-secret-token",
+      },
+    });
+
+    expect(publicConfig.apiTokenConfigured).toBe(true);
+    expect(JSON.stringify(publicConfig)).not.toContain("super-secret-token");
+    expect(publicConfig).not.toHaveProperty("apiAccessToken");
+  });
+
   it("normalizes Ringba config without disturbing webhook auth", () => {
     const nextConfig = normalizeIntegrationRingbaConfigInput(
       {

@@ -8,6 +8,7 @@ import { IntegrationProviderIcon } from "./IntegrationProviderIcon";
 import { IntegrationSecurityPanel } from "./IntegrationSecurityPanel";
 import { IntegrationSetupPanel } from "./IntegrationSetupPanel";
 import { RingbaApiSyncPanel, type RingbaApiSyncFormInput } from "./RingbaApiSyncPanel";
+import { RingbaImportPanel } from "./RingbaImportPanel";
 
 interface Props {
   currentUserRole: string;
@@ -120,6 +121,7 @@ export function IntegrationDetailWorkspace({
           callLogsTimeZone: input.callLogsTimeZone,
           pollIntervalMinutes: input.pollIntervalMinutes,
           lookbackHours: input.lookbackHours,
+          minimumDurationSeconds: input.minimumDurationSeconds,
         }),
       });
 
@@ -169,6 +171,36 @@ export function IntegrationDetailWorkspace({
     onError: (error) => {
       setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Ringba API sync failed.");
+    },
+  });
+
+  const ringbaTestMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/settings/integrations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "test-ringba-connection",
+          integrationId: integration.id,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Ringba connection test failed.");
+      }
+
+      return payload;
+    },
+    onSuccess: (payload) => {
+      setErrorMessage("");
+      setSuccessMessage(payload.message ?? "Ringba connection test succeeded.");
+    },
+    onError: (error) => {
+      setSuccessMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Ringba connection test failed.");
     },
   });
 
@@ -285,15 +317,20 @@ export function IntegrationDetailWorkspace({
         />
       </div>
       {integration.provider === "ringba" ? (
-        <RingbaApiSyncPanel
-          integration={integration}
-          canManage={canManage}
-          isSaving={ringbaApiMutation.isPending}
-          isCreating={isCreatingIntegration}
-          isSyncing={ringbaSyncMutation.isPending}
-          onSave={(input) => ringbaApiMutation.mutate(input)}
-          onSyncNow={() => ringbaSyncMutation.mutate()}
-        />
+        <>
+          <RingbaApiSyncPanel
+            integration={integration}
+            canManage={canManage}
+            isSaving={ringbaApiMutation.isPending}
+            isCreating={isCreatingIntegration}
+            isSyncing={ringbaSyncMutation.isPending}
+            isTesting={ringbaTestMutation.isPending}
+            onSave={(input) => ringbaApiMutation.mutate(input)}
+            onSyncNow={() => ringbaSyncMutation.mutate()}
+            onTestConnection={() => ringbaTestMutation.mutate()}
+          />
+          <RingbaImportPanel integration={integration} canManage={canManage} />
+        </>
       ) : null}
       {integration.provider !== "ringba" ? (
         <IntegrationSecurityPanel

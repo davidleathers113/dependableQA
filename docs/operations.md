@@ -44,6 +44,18 @@ Each verifies a shared secret (timing-safe compare via `src/server/netlify-reque
 | `integration-ingest` | header `x-integration-id` + per-integration webhook auth (see [integrations](integrations.md)) |
 | `stripe-webhook` | `stripe-signature` verified against `STRIPE_WEBHOOK_SECRET` |
 
+## Session-guarded app routes (Ringba controlled import)
+
+These are `prerender = false` Astro routes authed by the app session (`requireApiSession`), not shared secrets:
+
+| Route | Guard | Purpose |
+|---|---|---|
+| `POST /api/integrations/ringba/import` | owner/admin | Run a manual Ringba full-API import. Server **clamps `maxRecords` to 2000** (`RINGBA_MANUAL_IMPORT_MAX_RECORDS`) even if the body asks for more, imports metadata/recording links only (no AI), and tracks the run in `ringba_import_batches`. |
+| `POST /api/calls/analyze-selected` | any org member | The AI-spend gate. Queues transcription/analysis for the given call ids (org-verified, batch-capped). The **only** path that turns a Ringba import into OpenAI jobs. |
+| `POST /api/settings/integrations` `action: test-ringba-connection` | owner/admin | Fetches a 1-row Ringba sample to validate credentials; imports nothing. |
+
+**Batch lifecycle (`ringba_import_batches`):** `running` → `completed` (no rejects) / `partial` (some rejects) / `failed` (fetch error or finalize error; `error` column populated, a `ringba.api.import_failed` integration event recorded). The cost-control invariant: an import alone creates **no** `ai_jobs` rows — those appear only after `analyze-selected`.
+
 ## Netlify env contexts
 
 Set runtime config in the Netlify UI per context (Production / Deploy Preview). See [`docs/environment.md`](environment.md) for the full key list. As of the last audit, **Stripe secrets were missing from Netlify contexts** and `APP_URL` was absent from deploy previews — verify these before relying on billing in any deployed context.

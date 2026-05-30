@@ -7,6 +7,9 @@ const {
   requireApiSession,
   getAdminSupabase,
   sendIntegrationTestEvent,
+  loadIntegrationContext,
+  testRingbaConnection,
+  runRingbaApiSyncForIntegration,
   supportedIntegrationCatalog,
 } = vi.hoisted(() => ({
   getIntegrationsSummary: vi.fn(),
@@ -14,6 +17,9 @@ const {
   requireApiSession: vi.fn(),
   getAdminSupabase: vi.fn(),
   sendIntegrationTestEvent: vi.fn(),
+  loadIntegrationContext: vi.fn(),
+  testRingbaConnection: vi.fn(),
+  runRingbaApiSyncForIntegration: vi.fn(),
   supportedIntegrationCatalog: [
     {
       provider: "ringba",
@@ -52,6 +58,18 @@ vi.mock("../../src/lib/supabase/admin-client", () => ({
 
 vi.mock("../../src/server/integration-test-event", () => ({
   sendIntegrationTestEvent,
+}));
+
+vi.mock("../../src/server/integration-ingest", () => ({
+  loadIntegrationContext,
+}));
+
+vi.mock("../../src/server/ringba-import", () => ({
+  testRingbaConnection,
+}));
+
+vi.mock("../../src/server/ringba-api-sync", () => ({
+  runRingbaApiSyncForIntegration,
 }));
 
 import { GET, POST } from "../../src/pages/api/settings/integrations";
@@ -177,6 +195,9 @@ describe("/api/settings/integrations", () => {
     requireApiSession.mockReset();
     getAdminSupabase.mockReset();
     sendIntegrationTestEvent.mockReset();
+    loadIntegrationContext.mockReset();
+    testRingbaConnection.mockReset();
+    runRingbaApiSyncForIntegration.mockReset();
   });
 
   it("returns 401 for unauthenticated GET requests", async () => {
@@ -673,5 +694,69 @@ describe("/api/settings/integrations", () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error?: string };
     expect(body.error).toContain("IANA");
+  });
+
+  it("tests a Ringba connection without importing and reports the sample count", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_1",
+      organizationId: "org_1",
+      provider: "ringba",
+      displayName: "Ringba",
+      config: {},
+    });
+    testRingbaConnection.mockResolvedValue({ ok: true, sampleCount: 1 });
+    getIntegrationsSummary.mockResolvedValue({ integrations: [] });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test-ringba-connection",
+          integrationId: "integration_1",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(testRingbaConnection).toHaveBeenCalled();
+    const body = (await response.json()) as { message?: string };
+    expect(body.message).toContain("Connection successful");
+  });
+
+  it("returns 400 when the Ringba connection test fails", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_1",
+      organizationId: "org_1",
+      provider: "ringba",
+      displayName: "Ringba",
+      config: {},
+    });
+    testRingbaConnection.mockResolvedValue({ ok: false, sampleCount: 0, error: "unauthorized" });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test-ringba-connection",
+          integrationId: "integration_1",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(400);
   });
 });

@@ -18,6 +18,7 @@ import {
 import type { TablesInsert } from "../../../../supabase/types";
 import { loadIntegrationContext } from "../../../server/integration-ingest";
 import { runRingbaApiSyncForIntegration } from "../../../server/ringba-api-sync";
+import { testRingbaConnection } from "../../../server/ringba-import";
 import { sendIntegrationTestEvent } from "../../../server/integration-test-event";
 
 export const prerender = false;
@@ -264,9 +265,19 @@ export const POST: APIRoute = async (context) => {
       const callLogsTimeZone = asString(body.callLogsTimeZone);
       const pollRaw = body.pollIntervalMinutes;
       const lookRaw = body.lookbackHours;
+      const minDurationRaw = body.minimumDurationSeconds;
       const pollIntervalMinutes =
         pollRaw === undefined || pollRaw === null ? undefined : Number(pollRaw);
       const lookbackHours = lookRaw === undefined || lookRaw === null ? undefined : Number(lookRaw);
+      const minimumDurationSeconds =
+        minDurationRaw === undefined || minDurationRaw === null ? undefined : Number(minDurationRaw);
+
+      if (
+        minimumDurationSeconds !== undefined &&
+        (!Number.isFinite(minimumDurationSeconds) || minimumDurationSeconds < 0)
+      ) {
+        return json({ error: "minimumDurationSeconds must be 0 or greater." }, 400);
+      }
 
       if (callLogsTimeZone && !isValidIanaTimeZone(callLogsTimeZone)) {
         return json(
@@ -298,6 +309,8 @@ export const POST: APIRoute = async (context) => {
         pollIntervalMinutes:
           pollIntervalMinutes === undefined ? undefined : Math.floor(pollIntervalMinutes),
         lookbackHours: lookbackHours === undefined ? undefined : Math.floor(lookbackHours),
+        minimumDurationSeconds:
+          minimumDurationSeconds === undefined ? undefined : Math.floor(minimumDurationSeconds),
       });
 
       const updateResult = await admin
@@ -357,6 +370,18 @@ export const POST: APIRoute = async (context) => {
           skipped: outcome.skipped ?? false,
         },
       });
+    } else if (action === "test-ringba-connection") {
+      const integration = await loadIntegrationContext(admin, integrationId);
+      if (!integration || integration.provider !== "ringba") {
+        return json({ error: "Ringba integration not found." }, 404);
+      }
+
+      const outcome = await testRingbaConnection(integration);
+      if (!outcome.ok) {
+        return json({ error: outcome.error ?? "Ringba connection test failed." }, 400);
+      }
+
+      message = `Connection successful. Ringba returned ${outcome.sampleCount} sample record(s).`;
     } else if (action === "send-test-event") {
       try {
         const result = await sendIntegrationTestEvent(admin, integrationId);

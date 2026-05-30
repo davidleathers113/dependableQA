@@ -28,6 +28,16 @@ describe("ringba-calllogs", () => {
     expect(filterRecordingRows(rows as never)).toHaveLength(1);
   });
 
+  it("treats a present recordingUrl as a recording when hasRecording is omitted (live Ringba shape)", () => {
+    // Real Ringba call-logs responses often return recordingUrl without a
+    // hasRecording flag; such rows must NOT be silently dropped.
+    const rows = [
+      { recordingUrl: "https://example.com/live.mp3" },
+      { recordingUrl: "" },
+    ];
+    expect(filterRecordingRows(rows as never)).toHaveLength(1);
+  });
+
   it("maps a recording row into the shared ingest call shape", () => {
     const mapped = mapRingbaCallLogRowToNormalizedCall(
       {

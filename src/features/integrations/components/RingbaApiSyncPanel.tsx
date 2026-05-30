@@ -1,8 +1,9 @@
 import * as React from "react";
-import { CloudDownload, Play, Save } from "lucide-react";
+import { CloudDownload, Play, PlugZap, Save } from "lucide-react";
 import type { IntegrationCard } from "../../../lib/app-data";
 import {
   DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE,
+  DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS,
   RINGBA_API_LOOKBACK_DEFAULT_HOURS,
   RINGBA_API_POLL_INTERVAL_DEFAULT_MINUTES,
   RINGBA_API_POLL_INTERVAL_MAX_MINUTES,
@@ -16,6 +17,7 @@ export interface RingbaApiSyncFormInput {
   callLogsTimeZone: string;
   pollIntervalMinutes: number;
   lookbackHours: number;
+  minimumDurationSeconds: number;
 }
 
 interface Props {
@@ -24,8 +26,10 @@ interface Props {
   isSaving: boolean;
   isCreating: boolean;
   isSyncing: boolean;
+  isTesting: boolean;
   onSave: (input: RingbaApiSyncFormInput) => void;
   onSyncNow: () => void;
+  onTestConnection: () => void;
 }
 
 export function RingbaApiSyncPanel({
@@ -34,8 +38,10 @@ export function RingbaApiSyncPanel({
   isSaving,
   isCreating,
   isSyncing,
+  isTesting,
   onSave,
   onSyncNow,
+  onTestConnection,
 }: Props) {
   const rb = integration.ringba;
   const [enabled, setEnabled] = React.useState(rb.ringbaApiSyncEnabled);
@@ -46,6 +52,7 @@ export function RingbaApiSyncPanel({
   );
   const [pollMinutes, setPollMinutes] = React.useState(rb.pollIntervalMinutes);
   const [lookback, setLookback] = React.useState(rb.lookbackHours);
+  const [minDuration, setMinDuration] = React.useState(rb.minimumDurationSeconds);
   const [validationMessage, setValidationMessage] = React.useState("");
 
   React.useEffect(() => {
@@ -55,6 +62,7 @@ export function RingbaApiSyncPanel({
     setTimeZone(integration.ringba.callLogsTimeZone || DEFAULT_RINGBA_CALL_LOGS_TIME_ZONE);
     setPollMinutes(integration.ringba.pollIntervalMinutes);
     setLookback(integration.ringba.lookbackHours);
+    setMinDuration(integration.ringba.minimumDurationSeconds);
     setValidationMessage("");
   }, [
     integration.id,
@@ -63,6 +71,7 @@ export function RingbaApiSyncPanel({
     integration.ringba.callLogsTimeZone,
     integration.ringba.pollIntervalMinutes,
     integration.ringba.lookbackHours,
+    integration.ringba.minimumDurationSeconds,
   ]);
 
   const lastSyncLabel = integration.ringba.lastRingbaApiSyncAt
@@ -98,6 +107,12 @@ export function RingbaApiSyncPanel({
       return;
     }
 
+    const nextMinDuration = Math.round(Number(minDuration));
+    if (!Number.isFinite(nextMinDuration) || nextMinDuration < 0) {
+      setValidationMessage("Minimum duration must be 0 or greater.");
+      return;
+    }
+
     setValidationMessage("");
     onSave({
       ringbaApiSyncEnabled: enabled,
@@ -106,6 +121,7 @@ export function RingbaApiSyncPanel({
       callLogsTimeZone: nextTz,
       pollIntervalMinutes: nextPoll,
       lookbackHours: nextLookback,
+      minimumDurationSeconds: nextMinDuration,
     });
   }, [
     accountId,
@@ -113,6 +129,7 @@ export function RingbaApiSyncPanel({
     enabled,
     integration.ringba.apiTokenConfigured,
     lookback,
+    minDuration,
     onSave,
     pollMinutes,
     timeZone,
@@ -208,23 +225,41 @@ export function RingbaApiSyncPanel({
         </label>
       </div>
 
-      <label className="space-y-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          Lookback window (hours)
-        </span>
-        <input
-          type="number"
-          min={1}
-          max={168}
-          value={lookback}
-          onChange={(e) => setLookback(Number(e.target.value))}
-          disabled={disabled}
-          className="h-10 w-full max-w-xs rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
-        />
-        <span className="text-xs text-slate-500">
-          Default {RINGBA_API_LOOKBACK_DEFAULT_HOURS} hours of call log range per request (smaller windows reduce load).
-        </span>
-      </label>
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Lookback window (hours)
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={168}
+            value={lookback}
+            onChange={(e) => setLookback(Number(e.target.value))}
+            disabled={disabled}
+            className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
+          />
+          <span className="text-xs text-slate-500">
+            Default {RINGBA_API_LOOKBACK_DEFAULT_HOURS} hours of call log range per request (smaller windows reduce load).
+          </span>
+        </label>
+        <label className="space-y-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Minimum call duration (seconds)
+          </span>
+          <input
+            type="number"
+            min={0}
+            value={minDuration}
+            onChange={(e) => setMinDuration(Number(e.target.value))}
+            disabled={disabled}
+            className="h-10 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-60"
+          />
+          <span className="text-xs text-slate-500">
+            Default {DEFAULT_RINGBA_MINIMUM_DURATION_SECONDS}s. Calls shorter than this are skipped on sync and import.
+          </span>
+        </label>
+      </div>
 
       <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-400">
         Last successful sync watermark: <span className="text-slate-200">{lastSyncLabel}</span>
@@ -245,6 +280,15 @@ export function RingbaApiSyncPanel({
         >
           <Save className="h-4 w-4" />
           {isSaving ? "Saving…" : "Save API settings"}
+        </button>
+        <button
+          type="button"
+          onClick={onTestConnection}
+          disabled={disabled || isTesting}
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-violet-500/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlugZap className="h-4 w-4" />
+          {isTesting ? "Testing…" : "Test connection"}
         </button>
         <button
           type="button"

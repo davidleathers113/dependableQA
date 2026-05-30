@@ -1404,6 +1404,82 @@ export type Database = {
           },
         ]
       }
+      ringba_import_batches: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          date_end: string
+          date_start: string
+          error: string | null
+          id: string
+          import_behavior: string
+          integration_id: string
+          max_records: number
+          organization_id: string
+          recordings_imported: number
+          records_imported: number
+          records_seen: number
+          requested_by: string | null
+          status: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          date_end: string
+          date_start: string
+          error?: string | null
+          id?: string
+          import_behavior?: string
+          integration_id: string
+          max_records: number
+          organization_id: string
+          recordings_imported?: number
+          records_imported?: number
+          records_seen?: number
+          requested_by?: string | null
+          status?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          date_end?: string
+          date_start?: string
+          error?: string | null
+          id?: string
+          import_behavior?: string
+          integration_id?: string
+          max_records?: number
+          organization_id?: string
+          recordings_imported?: number
+          records_imported?: number
+          records_seen?: number
+          requested_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ringba_import_batches_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ringba_import_batches_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ringba_import_batches_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       saved_views: {
         Row: {
           config: Json

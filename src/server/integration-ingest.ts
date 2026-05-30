@@ -546,11 +546,17 @@ export async function ingestIntegrationCalls(
   integration: IntegrationContext,
   payload: Record<string, unknown>,
   calls: Array<Record<string, unknown>>,
-  ingestOptions?: { completionEventKind?: IngestIntegrationCallsCompletionKind }
+  ingestOptions?: { completionEventKind?: IngestIntegrationCallsCompletionKind; enqueueAiJobs?: boolean }
 ) {
   const completionKind: IngestIntegrationCallsCompletionKind = ingestOptions?.completionEventKind ?? "webhook";
+  // Cost control: Ringba full-API imports default to metadata-only (no transcription/
+  // analysis auto-queued). AI is queued explicitly via the analyze-selected gate.
+  // Webhook/pixel/CSV keep auto-enqueueing. An explicit override wins either way.
+  const enqueueAiJobs = ingestOptions?.enqueueAiJobs ?? completionKind !== "ringba_api";
   const processingErrors: Array<{ index: number; error: string }> = [];
+  const importedCallIds: string[] = [];
   let ingestedCount = 0;
+  let recordingCount = 0;
 
   for (let index = 0; index < calls.length; index += 1) {
     const callPayload = calls[index];
@@ -671,18 +677,25 @@ export async function ingestIntegrationCalls(
           throw new Error(callUpdate.error.message);
         }
 
-        await enqueueAiJob(client, {
-          organizationId: integration.organizationId,
-          callId,
-          jobType: "analysis",
-        });
+        if (enqueueAiJobs) {
+          await enqueueAiJob(client, {
+            organizationId: integration.organizationId,
+            callId,
+            jobType: "analysis",
+          });
+        }
       } else if (recordingUrl) {
-        await enqueueAiJob(client, {
-          organizationId: integration.organizationId,
-          callId,
-          jobType: "transcription",
-          payload: language ? { language } : {},
-        });
+        // Call has media but no transcript yet. When AI is suppressed (Ringba import)
+        // we leave transcription_status at its default 'pending' so the analyze gate
+        // can pick it up later; otherwise enqueue transcription now.
+        if (enqueueAiJobs) {
+          await enqueueAiJob(client, {
+            organizationId: integration.organizationId,
+            callId,
+            jobType: "transcription",
+            payload: language ? { language } : {},
+          });
+        }
       } else {
         const missingSourceUpdate = await client
           .from("calls")
@@ -697,6 +710,10 @@ export async function ingestIntegrationCalls(
         }
       }
 
+      if (recordingUrl) {
+        recordingCount += 1;
+      }
+      importedCallIds.push(callId);
       ingestedCount += 1;
     } catch (error) {
       processingErrors.push({
@@ -764,6 +781,8 @@ export async function ingestIntegrationCalls(
   return {
     ingestedCount,
     rejectedCount: processingErrors.length,
+    recordingCount,
+    importedCallIds,
     eventId,
     statusCode: processingErrors.length > 0 && ingestedCount === 0 ? 422 : 200,
   };

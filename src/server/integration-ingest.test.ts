@@ -138,6 +138,55 @@ describe("ingestIntegrationCalls", () => {
       source_kind: "webhook",
     });
   });
+
+  it("does NOT enqueue AI jobs for ringba_api imports by default (cost control)", async () => {
+    const { client } = createClient();
+    const integration = { ...createIntegration(), provider: "ringba" } satisfies IntegrationContext;
+
+    const result = await ingestIntegrationCalls(
+      client as never,
+      integration,
+      { ingestionMode: "api" },
+      [
+        {
+          callerNumber: "+15555550123",
+          startedAt: "2026-04-11T00:00:00.000Z",
+          recordingUrl: "https://example.com/call.mp3",
+        },
+      ],
+      { completionEventKind: "ringba_api" }
+    );
+
+    expect(result).toMatchObject({ ingestedCount: 1, recordingCount: 1 });
+    expect(result.importedCallIds).toEqual(["call_1"]);
+    expect(enqueueAiJob).not.toHaveBeenCalled();
+  });
+
+  it("enqueues AI jobs for ringba_api when enqueueAiJobs override is true", async () => {
+    const { client } = createClient();
+    const integration = { ...createIntegration(), provider: "ringba" } satisfies IntegrationContext;
+
+    await ingestIntegrationCalls(
+      client as never,
+      integration,
+      { ingestionMode: "api" },
+      [
+        {
+          callerNumber: "+15555550123",
+          startedAt: "2026-04-11T00:00:00.000Z",
+          recordingUrl: "https://example.com/call.mp3",
+        },
+      ],
+      { completionEventKind: "ringba_api", enqueueAiJobs: true }
+    );
+
+    expect(enqueueAiJob).toHaveBeenCalledWith(client, {
+      organizationId: "org_1",
+      callId: "call_1",
+      jobType: "transcription",
+      payload: {},
+    });
+  });
 });
 
 describe("parseRingbaPixelRequest", () => {

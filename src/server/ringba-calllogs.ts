@@ -8,6 +8,15 @@ export const RINGBA_CALLLOG_MAX_PAGES = 10;
 /** Cap ingested calls per sync to protect DB and job queue. */
 export const RINGBA_MAX_RECORDING_CALLS_PER_SYNC = 500;
 
+/**
+ * Hard server-side cap on a single manual full-API import. Enforced even if the
+ * UI is bypassed, so a historical backfill can never enqueue unbounded work.
+ */
+export const RINGBA_MANUAL_IMPORT_MAX_RECORDS = 2000;
+/** Bound Ringba HTTP requests for one manual import (recording-only filtering can
+ * make yield-per-page low, so this is higher than the scheduled-run page cap). */
+export const RINGBA_MANUAL_IMPORT_MAX_PAGES = 40;
+
 export interface RingbaCallLogRow {
   inboundCallId?: unknown;
   number?: unknown;
@@ -67,31 +76,57 @@ export function parseRingbaCallDtToIso(callDt: unknown, timeZone: string): strin
   return null;
 }
 
+function toReportYmd(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function buildRingbaCallLogsReportRange(lookbackHours: number): { reportStart: string; reportEnd: string } {
   const safeHours = Math.max(1, Math.floor(lookbackHours));
   const endMs = Date.now();
   const startMs = endMs - safeHours * 60 * 60 * 1000;
 
-  const toYmd = (ms: number) => {
-    const d = new Date(ms);
-    const y = d.getUTCFullYear();
-    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(d.getUTCDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  };
-
   return {
-    reportStart: toYmd(startMs),
-    reportEnd: toYmd(endMs),
+    reportStart: toReportYmd(startMs),
+    reportEnd: toReportYmd(endMs),
+  };
+}
+
+/**
+ * Build a Ringba report range (YMD) from an explicit start/end window, used by the
+ * manual full-API import. Both inputs are ISO timestamps; the order is normalized so
+ * an inverted range still produces a valid (start <= end) report window.
+ */
+export function buildRingbaReportRangeFromDates(
+  dateStartIso: string,
+  dateEndIso: string
+): { reportStart: string; reportEnd: string } {
+  const startMs = Date.parse(dateStartIso);
+  const endMs = Date.parse(dateEndIso);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+    throw new Error("Ringba import date range must be valid ISO timestamps.");
+  }
+  const lo = Math.min(startMs, endMs);
+  const hi = Math.max(startMs, endMs);
+  return {
+    reportStart: toReportYmd(lo),
+    reportEnd: toReportYmd(hi),
   };
 }
 
 function rowHasRecording(row: RingbaCallLogRow): boolean {
-  if (row.hasRecording !== true) {
+  // A usable recording requires a non-empty URL (we transcribe the URL). The
+  // `hasRecording` boolean is only a secondary signal: live Ringba call-logs
+  // responses commonly OMIT it while still returning a recordingUrl, so we treat
+  // a present URL as a recording unless `hasRecording` is *explicitly* false.
+  const url = asTrimmedString(row.recordingUrl);
+  if (url.length === 0) {
     return false;
   }
-  const url = asTrimmedString(row.recordingUrl);
-  return url.length > 0;
+  return row.hasRecording !== false;
 }
 
 export function filterRecordingRows(rows: RingbaCallLogRow[]): RingbaCallLogRow[] {
@@ -100,9 +135,14 @@ export function filterRecordingRows(rows: RingbaCallLogRow[]): RingbaCallLogRow[
 
 export function mapRingbaCallLogRowToNormalizedCall(
   row: RingbaCallLogRow,
-  options: { timeZone: string; minimumDurationSeconds: number }
+  options: { timeZone: string; minimumDurationSeconds: number; requireRecording?: boolean }
 ): Record<string, unknown> | null {
-  if (!rowHasRecording(row)) {
+  // Default to recording-only so the scheduled sync keeps its existing behavior;
+  // the manual import passes requireRecording=false to also import calls with no
+  // recording (metadata only — those will be marked missing_media downstream).
+  const requireRecording = options.requireRecording ?? true;
+  const hasRecording = rowHasRecording(row);
+  if (requireRecording && !hasRecording) {
     return null;
   }
 
@@ -133,11 +173,14 @@ export function mapRingbaCallLogRowToNormalizedCall(
     externalCallId: externalId,
     callerNumber: caller,
     durationSeconds,
-    recordingUrl: asTrimmedString(row.recordingUrl),
     campaignName: asTrimmedString(row.campaignName),
     startedAt,
     publisherName: asTrimmedString(row.publisherName),
   };
+
+  if (hasRecording) {
+    normalized.recordingUrl = asTrimmedString(row.recordingUrl);
+  }
 
   return normalized;
 }
