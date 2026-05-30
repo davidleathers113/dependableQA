@@ -1543,6 +1543,7 @@ export type Database = {
           organization_id: string
           reference_id: string | null
           reference_type: string | null
+          seq: number
           stripe_event_id: string | null
         }
         Insert: {
@@ -1556,6 +1557,7 @@ export type Database = {
           organization_id: string
           reference_id?: string | null
           reference_type?: string | null
+          seq?: never
           stripe_event_id?: string | null
         }
         Update: {
@@ -1569,6 +1571,7 @@ export type Database = {
           organization_id?: string
           reference_id?: string | null
           reference_type?: string | null
+          seq?: never
           stripe_event_id?: string | null
         }
         Relationships: [

@@ -53,7 +53,7 @@ describe.skipIf(!available)("apply_call_processing_debit (DB-level metering)", (
   async function balance(orgId = f.orgA): Promise<number> {
     const { rows } = await pool.query(
       `select balance_after_cents from public.wallet_ledger_entries
-       where organization_id = $1 order by created_at desc limit 1`,
+       where organization_id = $1 order by seq desc limit 1`,
       [orgId]
     );
     return rows[0] ? Number(rows[0].balance_after_cents) : 0;
@@ -118,6 +118,28 @@ describe.skipIf(!available)("apply_call_processing_debit (DB-level metering)", (
       })
     ).rejects.toThrow();
     expect(await balance()).toBe(1000); // no partial state
+  });
+
+  it("derives the current balance deterministically by seq when created_at ties (0017)", async () => {
+    // Two rows with the SAME created_at but different running balances. The
+    // later-inserted (higher seq) row — balance 700 — is authoritative; ordering
+    // by created_at alone would be ambiguous (could pick 1000).
+    const ts = "2026-05-30T00:00:00.000Z";
+    await pool.query(
+      `insert into public.wallet_ledger_entries
+         (organization_id, billing_account_id, entry_type, amount_cents, balance_after_cents, reference_type, created_at)
+       values ($1,$2,'recharge',1000,1000,'seed',$3),
+              ($1,$2,'debit',300,700,'seed',$3)`,
+      [f.orgA, f.billingAccountA, ts]
+    );
+
+    await withServiceRoleClient(pool, async (client) => {
+      const res = await client.query(DEBIT, [f.orgA, f.billingAccountA, f.callA, 200]);
+      expect(res.rows[0].applied).toBe(true);
+    });
+
+    // Debited from 700 (seq-latest) -> 500; NOT from 1000 (which would give 800).
+    expect(await balance()).toBe(500);
   });
 
   it("grants EXECUTE only to service_role", async () => {

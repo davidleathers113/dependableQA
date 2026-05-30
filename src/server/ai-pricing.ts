@@ -57,7 +57,9 @@ export async function loadWalletBalanceCents(client: SupabaseAny, organizationId
     .from("wallet_ledger_entries")
     .select("balance_after_cents")
     .eq("organization_id", organizationId)
-    .order("created_at", { ascending: false })
+    // Order by the monotonic `seq` (insertion order) — deterministic even when
+    // two ledger rows share a created_at. See migration 0017.
+    .order("seq", { ascending: false })
     .limit(1)
     .maybeSingle();
 
