@@ -456,6 +456,66 @@ describe("ai jobs", () => {
     });
   });
 
+  it("releases the wallet hold when an expired transcription job exhausts retries", async () => {
+    const { client, jobs, rpcCalls } = createClient([
+      {
+        id: "job_1",
+        organization_id: "org_1",
+        call_id: "call_1",
+        job_type: "transcription",
+        status: "running",
+        attempt_count: 3,
+        max_attempts: 3,
+        priority: 100,
+        scheduled_at: "2026-04-11T00:00:00.000Z",
+        started_at: "2026-04-11T00:01:00.000Z",
+        completed_at: null,
+        lease_expires_at: "2026-04-11T00:02:00.000Z",
+        dedupe_key: "call_1:transcription",
+        payload_json: {},
+        last_error: null,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+      },
+    ]);
+
+    const recovered = await recoverExpiredAiJobs(client as never, { limit: 5 });
+
+    expect(recovered).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ status: "failed" });
+    expect(rpcCalls.some((c) => c.name === "release_call_processing_hold")).toBe(true);
+  });
+
+  it("does NOT release the wallet hold when an expired transcription job will retry", async () => {
+    const { client, jobs, rpcCalls } = createClient([
+      {
+        id: "job_1",
+        organization_id: "org_1",
+        call_id: "call_1",
+        job_type: "transcription",
+        status: "running",
+        attempt_count: 1,
+        max_attempts: 3,
+        priority: 100,
+        scheduled_at: "2026-04-11T00:00:00.000Z",
+        started_at: "2026-04-11T00:01:00.000Z",
+        completed_at: null,
+        lease_expires_at: "2026-04-11T00:02:00.000Z",
+        dedupe_key: "call_1:transcription",
+        payload_json: {},
+        last_error: null,
+        created_at: "2026-04-11T00:00:00.000Z",
+        updated_at: "2026-04-11T00:00:00.000Z",
+      },
+    ]);
+
+    const recovered = await recoverExpiredAiJobs(client as never, { limit: 5 });
+
+    expect(recovered).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ status: "retry_scheduled" });
+    expect(rpcCalls.some((c) => c.name === "release_call_processing_hold")).toBe(false);
+  });
+
   it("runs queued jobs and enqueues downstream analysis after transcription", async () => {
     getOpenAiServerConfig.mockReset();
     getOpenAiServerConfig.mockReturnValue({

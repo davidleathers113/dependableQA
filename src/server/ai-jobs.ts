@@ -484,6 +484,21 @@ export async function recoverExpiredAiJobs(
           attemptCount: job.attempt_count,
         }
       );
+      // Terminal transcription failure recovered from an expired lease: release
+      // the wallet reservation so held funds return to available balance instead
+      // of waiting for the expiry sweep. Only transcription jobs reserve a hold,
+      // and only a job that will never run again should free it (the retry branch
+      // keeps it). Best-effort — hold cleanup must never break recovery.
+      if (job.job_type === "transcription") {
+        try {
+          await releaseCallHold(client, {
+            organizationId: job.organization_id,
+            callId: job.call_id,
+          });
+        } catch {
+          // Swept later if this fails.
+        }
+      }
     }
 
     recovered.push(update.data);
