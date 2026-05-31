@@ -29,6 +29,19 @@ const test = base.extend<{ page: Page }>({
 // two elements. Scope to the visible copy.
 const vis = (locator: Locator) => locator.filter({ visible: true });
 
+// The QA panel is a tabbed workspace (Summary, Disposition, Flags, Notes, QA).
+// Tab buttons render their label plus an optional count badge (e.g. "Flags1"),
+// so match by name without exact and scope to the visible responsive copy.
+// Retry the click to absorb a pre-hydration no-op (the island's onClick isn't
+// wired until hydration), confirming the tab's content rendered before
+// returning.
+async function showTab(page: Page, name: string, content: Locator) {
+  await expect(async () => {
+    await vis(page.getByRole("button", { name, exact: false })).first().click();
+    await expect(content).toBeVisible({ timeout: 1500 });
+  }).toPass({ timeout: 15_000, intervals: [300, 700, 1200] });
+}
+
 /**
  * Type into a hydrated React (controlled) input with real keystrokes so the
  * island's onChange commits state — plain fill() can set only the DOM value
@@ -57,8 +70,25 @@ test.describe("reviewer workflow", () => {
     await expect(
       page.getByText("I want pricing details for the enterprise plan.", { exact: true })
     ).toBeVisible();
+    // The seeded call has an open flag, so the QA panel auto-selects the Flags tab.
     await expect(vis(page.getByText("Missing disclosure", { exact: true }))).toBeVisible();
-    await expect(vis(page.getByText(SEEDED_NOTE, { exact: true }))).toBeVisible();
+    // Notes live on their own tab — navigate to it before asserting the note.
+    await showTab(page, "Notes", vis(page.getByText(SEEDED_NOTE, { exact: true })));
+  });
+
+  test("QA panel defaults to the Flags tab when the call has open flags", async ({ page }) => {
+    await page.goto(`/app/calls/${callId}`);
+    // No tab click: the open seeded flag drives the default tab selection.
+    await expect(vis(page.getByText("Missing disclosure", { exact: true }))).toBeVisible();
+    await expect(vis(page.getByText("1 open", { exact: true }))).toBeVisible();
+  });
+
+  test("QA panel tabs switch between flags and notes", async ({ page }) => {
+    await page.goto(`/app/calls/${callId}`);
+    await expect(vis(page.getByText("Missing disclosure", { exact: true }))).toBeVisible();
+    await showTab(page, "Notes", vis(page.getByText(SEEDED_NOTE, { exact: true })));
+    await expect(vis(page.getByText("Missing disclosure", { exact: true }))).toHaveCount(0);
+    await showTab(page, "Flags", vis(page.getByText("Missing disclosure", { exact: true })));
   });
 
   test("transcript search finds matches", async ({ page }) => {
@@ -109,11 +139,10 @@ test.describe("reviewer workflow", () => {
 
   test("adding a note shows it in the notes list", async ({ page }) => {
     await page.goto(`/app/calls/${callId}`);
-    await typeStable(
-      vis(page.getByRole("textbox", { name: "Note at current playhead", exact: false })),
-      "E2E added note"
-    );
-    const save = vis(page.getByRole("button", { name: "Save note", exact: true }));
+    const noteBox = vis(page.getByRole("textbox", { name: "Note at current playhead", exact: false }));
+    await showTab(page, "Notes", noteBox);
+    await typeStable(noteBox, "E2E added note");
+    const save = vis(page.getByRole("button", { name: "Save note at playhead", exact: true }));
     await expect(save).toBeEnabled();
     await save.click();
     await expect(vis(page.getByText("E2E added note", { exact: true }))).toBeVisible();
@@ -121,7 +150,7 @@ test.describe("reviewer workflow", () => {
 
   test("deleting the seeded note removes it", async ({ page }) => {
     await page.goto(`/app/calls/${callId}`);
-    await expect(vis(page.getByText(SEEDED_NOTE, { exact: true }))).toBeVisible();
+    await showTab(page, "Notes", vis(page.getByText(SEEDED_NOTE, { exact: true })));
     // Click the seeded note's Delete (its card is the nearest ancestor with a
     // Delete button) until the note is gone. Retry absorbs a pre-hydration
     // no-op click; idempotent because once deleted there's nothing left to click.

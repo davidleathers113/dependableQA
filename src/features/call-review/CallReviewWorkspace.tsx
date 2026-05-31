@@ -83,6 +83,10 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
   const [selectedFlagId, setSelectedFlagId] = React.useState<string | null>(null);
   const [mobileTab, setMobileTab] = React.useState<"transcript" | "review">("transcript");
   const [qaTab, setQaTab] = React.useState<QaTab>("summary");
+  // When a call loads with open flags, surface them first instead of the
+  // summary tab — operational visibility for reviewers. Keyed on callId so it
+  // runs once per call and never overrides a later manual tab change.
+  const autoFlagTabCallIdRef = React.useRef<string | null>(null);
   // Initialized to "compact" on first render (matches SSR) and hydrated from
   // localStorage in an effect to avoid a hydration mismatch.
   const [mode, setMode] = React.useState<TranscriptMode>("compact");
@@ -107,6 +111,19 @@ export function CallReviewWorkspace({ organizationId, callId, initialData }: Pro
   React.useEffect(() => {
     window.localStorage.setItem(MODE_STORAGE_KEY, mode);
   }, [mode]);
+
+  React.useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    if (autoFlagTabCallIdRef.current === callId) {
+      return;
+    }
+    autoFlagTabCallIdRef.current = callId;
+    if (detail.flags.some((f) => f.status === "open")) {
+      setQaTab("flags");
+    }
+  }, [detail, callId]);
 
   const turns = React.useMemo(
     () => (detail ? groupTranscriptSegments(detail.transcriptSegments) : []),
