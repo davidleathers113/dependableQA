@@ -16,6 +16,7 @@ interface Props {
   isTesting: boolean;
   lastRingbaApiSyncAt: string | null;
   testNotice?: { type: "success" | "error"; text: string } | null;
+  onCreate: () => void;
   onSave: (input: RingbaApiSyncFormInput) => void;
   onTestConnection: (input: RingbaConnectionTestInput) => void;
 }
@@ -29,6 +30,7 @@ export function RingbaConnectionFields({
   isTesting,
   lastRingbaApiSyncAt,
   testNotice,
+  onCreate,
   onSave,
   onTestConnection,
 }: Props) {
@@ -54,9 +56,24 @@ export function RingbaConnectionFields({
       </div>
 
       {!isConfigured ? (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          Create the Ringba integration first, then enter your Account ID and API token here to save settings and test
-          the connection.
+        <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <p>
+            Create the Ringba integration first, then enter your Account ID and API token here to save settings and test
+            the connection.
+          </p>
+          {canManage ? (
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={isCreating}
+              className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Save className="h-4 w-4" aria-hidden />
+              {isCreating ? "Creating…" : "Create Ringba integration"}
+            </button>
+          ) : (
+            <p className="text-amber-200/80">Only owners and admins can create the integration.</p>
+          )}
         </div>
       ) : null}
 

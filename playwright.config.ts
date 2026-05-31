@@ -23,12 +23,18 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "setup", testMatch: "**/auth.setup.ts" },
+    { name: "setup", testMatch: "**/*.setup.ts" },
     {
       name: "chromium",
       testMatch: "**/reviewer-workflow.spec.ts",
       dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"], storageState: "tests/e2e/.auth/reviewer.json" },
+    },
+    {
+      name: "integrations",
+      testMatch: "**/integrations.spec.ts",
+      dependencies: ["setup"],
+      use: { ...devices["Desktop Chrome"], storageState: "tests/e2e/.auth/owner.json" },
     },
   ],
   webServer: {

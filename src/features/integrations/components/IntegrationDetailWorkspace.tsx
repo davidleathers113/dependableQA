@@ -284,6 +284,7 @@ export function IntegrationDetailWorkspace({
               isTesting={ringbaTestMutation.isPending}
               lastRingbaApiSyncAt={integration.ringba.lastRingbaApiSyncAt}
               testNotice={ringbaTestNotice}
+              onCreate={onCreateIntegration}
               onSave={(input) => ringbaApiMutation.mutate(input)}
               onTestConnection={(input) => ringbaTestMutation.mutate(input)}
             />
