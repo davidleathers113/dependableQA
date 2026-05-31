@@ -1746,6 +1746,34 @@ export type Database = {
         }
         Returns: boolean
       }
+      summarize_calls: {
+        Args: {
+          p_call_ids?: string[]
+          p_campaign_id?: string
+          p_conversion_status?: string
+          p_date_from?: string
+          p_date_to?: string
+          p_disposition?: string
+          p_final_disposition?: string
+          p_fraud_risk?: string
+          p_lead_quality?: string
+          p_org: string
+          p_payout_recommendation?: string
+          p_publisher_id?: string
+          p_review_status?: string
+        }
+        Returns: {
+          compliance_flag_count: number
+          disqualified_count: number
+          flagged_calls: number
+          needs_review_count: number
+          qualified_count: number
+          top_publisher_flagged_calls: number
+          top_publisher_id: string
+          top_publisher_total_calls: number
+          total_calls: number
+        }[]
+      }
       sweep_expired_processing_holds: { Args: never; Returns: number }
     }
     Enums: {

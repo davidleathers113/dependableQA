@@ -1403,128 +1403,67 @@ async function getCallsSummary(
   matchingIds: string[] | null
 ): Promise<CallsSummary> {
   const normalized = normalizeCallFilters(filters);
-  let query = client
-    .from("calls")
-    .select("id, publisher_id, current_disposition, current_review_status, flag_count")
-    .eq("organization_id", organizationId);
 
-  if (normalized.reviewStatus) {
-    query = query.eq("current_review_status", normalized.reviewStatus);
-  }
-
-  if (normalized.publisherId) {
-    query = query.eq("publisher_id", normalized.publisherId);
-  }
-
-  if (normalized.campaignId) {
-    query = query.eq("campaign_id", normalized.campaignId);
-  }
-
-  if (normalized.disposition) {
-    query = query.eq("current_disposition", normalized.disposition);
-  }
-
-  // Keep summary metrics consistent with the row query: apply the same
-  // disposition-intelligence filters so the cards reflect the filtered set.
-  if (normalized.finalDisposition) {
-    query = query.eq("ai_final_disposition", normalized.finalDisposition);
-  }
-
-  if (normalized.conversionStatus) {
-    query = query.eq("ai_conversion_status", normalized.conversionStatus);
-  }
-
-  if (normalized.fraudRisk) {
-    query = query.eq("ai_fraud_risk", normalized.fraudRisk);
-  }
-
-  if (normalized.leadQuality) {
-    query = query.eq("ai_lead_quality", normalized.leadQuality);
-  }
-
-  if (normalized.payoutRecommendation) {
-    query = query.eq("ai_payout_recommendation", normalized.payoutRecommendation);
-  }
-
-  if (normalized.dateFrom) {
-    query = query.gte("started_at", normalized.dateFrom);
-  }
-
-  if (normalized.dateTo) {
-    query = query.lte("started_at", normalized.dateTo);
-  }
-
-  if (matchingIds && matchingIds.length > 0) {
-    query = query.in("id", matchingIds);
-  }
-
-  const { data, error } = await query.limit(500);
+  // Aggregate over the *entire* filtered set in Postgres (see
+  // supabase/migrations/0021_calls_summary_aggregate.sql). The previous JS path
+  // capped the computation at 500 rows, so cards diverged from the filtered call
+  // set once it exceeded 500 calls. The RPC runs SECURITY INVOKER, so RLS scopes
+  // it to the caller's organization. `matchingIds` carries the search/flag
+  // intersection from the caller: null => no id filter; [] => match nothing
+  // (mirrors the row query, which returns no rows for an empty match set).
+  const { data, error } = await client.rpc("summarize_calls", {
+    p_org: organizationId,
+    p_review_status: normalized.reviewStatus || undefined,
+    p_publisher_id: normalized.publisherId || undefined,
+    p_campaign_id: normalized.campaignId || undefined,
+    p_disposition: normalized.disposition || undefined,
+    p_final_disposition: normalized.finalDisposition || undefined,
+    p_conversion_status: normalized.conversionStatus || undefined,
+    p_fraud_risk: normalized.fraudRisk || undefined,
+    p_lead_quality: normalized.leadQuality || undefined,
+    p_payout_recommendation: normalized.payoutRecommendation || undefined,
+    p_date_from: normalized.dateFrom || undefined,
+    p_date_to: normalized.dateTo || undefined,
+    p_call_ids: matchingIds ?? undefined,
+  });
   assertNoError(error, "Unable to load calls summary.");
 
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
-  const callIds = rows.map((row) => asString(row.id)).filter((id) => id.length > 0);
+  const row = (Array.isArray(data) ? data[0] : null) as Record<string, unknown> | null;
+  const totalCalls = asNumber(row?.total_calls);
 
-  const complianceResult = callIds.length
-    ? await client
-        .from("call_flags")
-        .select("call_id, flag_category")
-        .eq("organization_id", organizationId)
-        .eq("status", "open")
-        .in("call_id", callIds)
-    : { data: [], error: null };
-
-  assertNoError(complianceResult.error, "Unable to load compliance flags.");
-
-  const publisherMetrics = new Map<string, { totalCalls: number; flaggedCalls: number }>();
-  for (const row of rows) {
-    const publisherId = asNullableString(row.publisher_id) ?? "unassigned";
-    const metrics = publisherMetrics.get(publisherId) ?? { totalCalls: 0, flaggedCalls: 0 };
-    metrics.totalCalls += 1;
-    if (asNumber(row.flag_count) > 0) {
-      metrics.flaggedCalls += 1;
-    }
-    publisherMetrics.set(publisherId, metrics);
-  }
-
-  const publisherIds = Array.from(publisherMetrics.keys()).filter((publisherId) => publisherId !== "unassigned");
-  const publishersResult = publisherIds.length
-    ? await client
+  // Resolve the winning publisher's display name (the RPC returns its id +
+  // counts). A null id with calls present means the "Unassigned" bucket won;
+  // no calls at all means there is no top publisher.
+  let topFlaggedPublisher: CallsSummary["topFlaggedPublisher"] = null;
+  if (row && totalCalls > 0) {
+    const topPublisherId = asNullableString(row.top_publisher_id);
+    let publisherName = "Unassigned";
+    if (topPublisherId) {
+      const publisherResult = await client
         .from("publishers")
-        .select("id, name")
+        .select("name")
         .eq("organization_id", organizationId)
-        .in("id", publisherIds)
-    : { data: [], error: null };
-
-  assertNoError(publishersResult.error, "Unable to load publisher summary.");
-
-  const publisherNames = new Map<string, string>();
-  for (const row of (publishersResult.data ?? []) as Array<Record<string, unknown>>) {
-    publisherNames.set(asString(row.id), asString(row.name));
+        .eq("id", topPublisherId)
+        .maybeSingle();
+      assertNoError(publisherResult.error, "Unable to load publisher summary.");
+      publisherName =
+        asNullableString((publisherResult.data as Record<string, unknown> | null)?.name) ?? "Unknown Publisher";
+    }
+    topFlaggedPublisher = {
+      publisherId: topPublisherId,
+      publisherName,
+      flaggedCalls: asNumber(row.top_publisher_flagged_calls),
+      totalCalls: asNumber(row.top_publisher_total_calls),
+    };
   }
-
-  const topFlaggedPublisher = Array.from(publisherMetrics.entries())
-    .map(([publisherId, metrics]) => ({
-      publisherId: publisherId === "unassigned" ? null : publisherId,
-      publisherName: publisherId === "unassigned" ? "Unassigned" : publisherNames.get(publisherId) ?? "Unknown Publisher",
-      flaggedCalls: metrics.flaggedCalls,
-      totalCalls: metrics.totalCalls,
-    }))
-    .sort((left, right) => {
-      if (left.flaggedCalls !== right.flaggedCalls) {
-        return right.flaggedCalls - left.flaggedCalls;
-      }
-      return right.totalCalls - left.totalCalls;
-    })[0] ?? null;
 
   return {
-    totalCalls: rows.length,
-    flaggedCalls: rows.filter((row) => asNumber(row.flag_count) > 0).length,
-    needsReviewCount: rows.filter((row) => asString(row.current_review_status) !== "reviewed").length,
-    complianceFlagCount: ((complianceResult.data ?? []) as Array<Record<string, unknown>>).filter((row) =>
-      normalizeText(asNullableString(row.flag_category)).includes("compliance")
-    ).length,
-    qualifiedCount: rows.filter((row) => getDispositionCategory(asNullableString(row.current_disposition)) === "qualified").length,
-    disqualifiedCount: rows.filter((row) => getDispositionCategory(asNullableString(row.current_disposition)) === "disqualified").length,
+    totalCalls,
+    flaggedCalls: asNumber(row?.flagged_calls),
+    needsReviewCount: asNumber(row?.needs_review_count),
+    complianceFlagCount: asNumber(row?.compliance_flag_count),
+    qualifiedCount: asNumber(row?.qualified_count),
+    disqualifiedCount: asNumber(row?.disqualified_count),
     topFlaggedPublisher,
   };
 }
