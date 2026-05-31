@@ -23,6 +23,10 @@ which is `check:env-example` → `check:migrations` → `test` → `build` (`ast
 - `npm run check:env-example` — fails if any required key (see `scripts/check-env-example.mjs`) is absent from `.env-example`. Add new required env vars there.
 - `npm run check:migrations` — fails unless `supabase/migrations` are numerically contiguous.
 
+**At release time, run `npm run release:verify`** (= `check:clean-tree` → `ci:verify`). `check:clean-tree` fails when `git status --porcelain` is non-empty, so a deploy certifies a specific committed SHA rather than a dirty tree (QA report Blocker 2). It is deliberately *not* part of `ci:verify` (developers run that against a dirty tree constantly; a fresh CI checkout is always clean).
+
+**Verifying which SHA is live (Blocker 3).** The build stamps its git commit into the bundle (`astro.config.ts` Vite `define`, preferring `COMMIT_REF`/`GITHUB_SHA`, falling back to `git rev-parse HEAD`). Hit `GET /api/version` → `{ "commit", "builtAt" }` after deploying and confirm `commit` equals the reviewed `HEAD`. This closes the gap where Netlify reported `commit_ref: null` and the live deploy could not be mapped to a reviewed SHA.
+
 > ⚠️ **Migration drift warning.** `check:migrations` only verifies the migration *files* are numerically contiguous — neither Netlify nor GitHub CI **applies** migrations to any database. Schema changes are applied **manually** (Supabase CLI/MCP), decoupled from the deploy. If you merge a migration but skip the manual apply, the app code ships against a schema the target database does not have. This actually happened: `0008_call_review_workspace` shipped in code on 2026-04-13 but was not applied to production until 2026-05-29, silently 500ing the call-detail page (it queries `call_review_notes` / `call_flags.start_seconds`). **Always follow the [release checklist](releasing.md) and apply pending migrations as part of every release.**
 
 ## Scheduled functions (`netlify.toml`)
