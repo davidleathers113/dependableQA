@@ -188,12 +188,9 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
 
   return (
     <section className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-white">Integrations</h1>
-        <p className="text-sm text-slate-400">
-          Connect call providers, configure webhook security, and monitor inbound event health.
-        </p>
-      </header>
+      <p className="max-w-2xl text-sm text-slate-400">
+        Connect Ringba and other call platforms, import recordings, and monitor ingestion health.
+      </p>
 
       {integrationsQuery.error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -204,9 +201,10 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
       <div className="grid gap-6 lg:grid-cols-3">
         {integrations.length === 0 ? (
           <div className="lg:col-span-3 rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
-            <h2 className="text-lg font-semibold text-white">No integrations yet</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Add or configure a provider to start receiving inbound webhook events in DependableQA.
+            <h2 className="text-lg font-semibold text-white">Connect your first call platform</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm text-slate-400">
+              Start with Ringba to import recordings and monitor ingestion health. Reload to refresh the supported
+              provider catalog if nothing appears here.
             </p>
           </div>
         ) : (

@@ -8,9 +8,12 @@ import {
 import {
   getDiagnosticsSummary,
   getDiagnosticsSummaryLine,
+  getIntegrationCapabilities,
+  getIntegrationChecklist,
   getIntegrationHealth,
   getIntegrationLatestEventText,
   getIntegrationLatestStatusLabel,
+  getIntegrationNextStep,
   getRingbaPixelUrl,
   getIntegrationSummaryMeta,
   getSecretSourceLabel,
@@ -303,5 +306,111 @@ describe("integration helpers", () => {
 
     expect(url.includes("&publisher_name=[tag:Publisher:Name]")).toBe(true);
     expect(url.endsWith("&buyer_name=[tag:Buyer:Name]")).toBe(true);
+  });
+});
+
+describe("integration setup guidance", () => {
+  it("guides an unconfigured Ringba placeholder to create first", () => {
+    const integration = createIntegration({ isConfigured: false, isCatalogPlaceholder: true });
+
+    expect(getIntegrationChecklist(integration).every((item) => !item.done)).toBe(true);
+
+    const next = getIntegrationNextStep(integration);
+    expect(next.complete).toBe(false);
+    expect(next.cta).toEqual({ label: "Create integration", targetTab: "overview" });
+  });
+
+  it("advances to verify once Ringba credentials are saved but unsynced", () => {
+    const integration = createIntegration({
+      ringba: rb({ apiTokenConfigured: true, ringbaAccountId: "RA123" }),
+    });
+    const byId = Object.fromEntries(getIntegrationChecklist(integration).map((item) => [item.id, item.done]));
+
+    expect(byId.create).toBe(true);
+    expect(byId.credentials).toBe(true);
+    expect(byId.verify).toBe(false);
+    expect(getIntegrationNextStep(integration).cta).toEqual({ label: "Test connection", targetTab: "api" });
+  });
+
+  it("treats a completed sync watermark as a verified connection", () => {
+    const integration = createIntegration({
+      ringba: rb({
+        apiTokenConfigured: true,
+        ringbaAccountId: "RA123",
+        lastRingbaApiSyncAt: "2026-04-10T00:00:00.000Z",
+      }),
+    });
+    const verify = getIntegrationChecklist(integration).find((item) => item.id === "verify");
+
+    expect(verify?.done).toBe(true);
+  });
+
+  it("keeps pixel and scheduled-sync steps optional", () => {
+    const optional = getIntegrationChecklist(createIntegration())
+      .filter((item) => item.optional)
+      .map((item) => item.id);
+
+    expect(optional).toEqual(["pixel", "schedule"]);
+  });
+
+  it("reports Ringba capabilities independently (API vs pixel vs sync)", () => {
+    const integration = createIntegration({
+      ringba: rb({
+        apiTokenConfigured: true,
+        ringbaAccountId: "RA123",
+        lastRingbaApiSyncAt: "2026-04-10T00:00:00.000Z",
+        ringbaApiSyncEnabled: true,
+        publicIngestKey: "",
+      }),
+    });
+    const caps = Object.fromEntries(getIntegrationCapabilities(integration).map((capability) => [capability.key, capability.state]));
+
+    expect(caps.api).toBe("ready");
+    expect(caps.pixel).toBe("inactive");
+    expect(caps.sync).toBe("ready");
+  });
+
+  it("flags Ringba capabilities for attention on recent errors", () => {
+    const integration = createIntegration({
+      ringba: rb({ apiTokenConfigured: true, ringbaAccountId: "RA123" }),
+      recentEvents: [
+        { id: "event-1", eventType: "ringba.sync", severity: "error", message: "boom", createdAt: "2026-04-10T00:00:00.000Z" },
+      ],
+    });
+    const api = getIntegrationCapabilities(integration).find((capability) => capability.key === "api");
+
+    expect(api?.state).toBe("attention");
+  });
+
+  it("builds a webhook-oriented checklist and capabilities for non-Ringba providers", () => {
+    const integration = createIntegration({
+      provider: "trackdrive",
+      webhookAuth: {
+        authType: "hmac-sha256",
+        headerName: "x-sig",
+        prefix: "sha256=",
+        secretConfigured: true,
+        secretSource: "integration",
+      },
+    });
+
+    expect(getIntegrationChecklist(integration).map((item) => item.id)).toEqual(["create", "security", "first-event"]);
+    expect(getIntegrationNextStep(integration).cta).toEqual({ label: "Send a test event", targetTab: "setup" });
+    expect(getIntegrationCapabilities(integration).map((capability) => capability.key)).toEqual(["auth", "events"]);
+  });
+
+  it("declares completion when all required steps are done", () => {
+    const integration = createIntegration({
+      ringba: rb({
+        apiTokenConfigured: true,
+        ringbaAccountId: "RA123",
+        lastRingbaApiSyncAt: "2026-04-10T00:00:00.000Z",
+      }),
+      lastSuccessAt: "2026-04-10T00:00:00.000Z",
+    });
+    const next = getIntegrationNextStep(integration);
+
+    expect(next.complete).toBe(true);
+    expect(next.cta).toBeNull();
   });
 });

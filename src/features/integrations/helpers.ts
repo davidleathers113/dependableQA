@@ -460,6 +460,275 @@ export function getDiagnosticsSummary(integration: IntegrationCard) {
   };
 }
 
+/**
+ * Tab ids in the integration detail workspace. Kept here so the checklist /
+ * next-step helpers can point a CTA at the right tab without importing UI.
+ */
+export type IntegrationWorkspaceTab =
+  | "overview"
+  | "pixel"
+  | "api"
+  | "advanced"
+  | "imports"
+  | "diagnostics"
+  | "setup"
+  | "security";
+
+export interface IntegrationChecklistItem {
+  id: string;
+  label: string;
+  done: boolean;
+  optional: boolean;
+  targetTab: IntegrationWorkspaceTab;
+}
+
+export interface IntegrationNextStep {
+  label: string;
+  description: string;
+  cta: { label: string; targetTab: IntegrationWorkspaceTab } | null;
+  /** True when no required steps remain. */
+  complete: boolean;
+}
+
+export type IntegrationCapabilityState = "ready" | "inactive" | "attention";
+
+export interface IntegrationCapability {
+  key: string;
+  label: string;
+  state: IntegrationCapabilityState;
+  detail: string;
+}
+
+function hasRecentErrorActivity(integration: IntegrationCard) {
+  return integration.status === "error" || integration.recentEvents.some((event) => event.severity === "error");
+}
+
+function hasSuccessfulEvent(integration: IntegrationCard) {
+  return integration.recentEvents.some((event) => event.severity !== "error" && event.severity !== "warning");
+}
+
+/**
+ * Ordered setup checklist derived purely from IntegrationCard. Required items
+ * drive the "next step"; optional items (pixel, scheduled sync) never block it.
+ *
+ * Note: there is no persisted "tested" / "imported" flag on the card, so
+ * "Verify connection" and "Import first calls" use proxies — the Ringba API
+ * sync watermark, success-severity events, and the integration-level
+ * lastSuccessAt. Good enough for guidance; exactness would need per-channel
+ * timestamps from recentEvents.
+ */
+export function getIntegrationChecklist(integration: IntegrationCard): IntegrationChecklistItem[] {
+  const created = integration.isConfigured && !integration.isCatalogPlaceholder;
+
+  if (integration.provider === "ringba") {
+    const credentialsReady = integration.ringba.apiTokenConfigured && integration.ringba.ringbaAccountId !== "";
+    const connectionVerified = integration.ringba.lastRingbaApiSyncAt !== null || hasSuccessfulEvent(integration);
+    const callsImported = integration.lastSuccessAt !== null || integration.recentEvents.length > 0;
+
+    return [
+      { id: "create", label: "Create the Ringba integration", done: created, optional: false, targetTab: "overview" },
+      {
+        id: "credentials",
+        label: "Add your API Account ID and token",
+        done: created && credentialsReady,
+        optional: false,
+        targetTab: "api",
+      },
+      {
+        id: "verify",
+        label: "Verify the API connection",
+        done: created && credentialsReady && connectionVerified,
+        optional: false,
+        targetTab: "api",
+      },
+      {
+        id: "import",
+        label: "Import your first calls",
+        done: created && callsImported,
+        optional: false,
+        targetTab: "imports",
+      },
+      {
+        id: "pixel",
+        label: "Install the real-time pixel",
+        done: created && integration.ringba.publicIngestKey !== "" && integration.lastSuccessAt !== null,
+        optional: true,
+        targetTab: "pixel",
+      },
+      {
+        id: "schedule",
+        label: "Enable scheduled sync",
+        done: created && integration.ringba.ringbaApiSyncEnabled,
+        optional: true,
+        targetTab: "advanced",
+      },
+    ];
+  }
+
+  const securityReady = integration.webhookAuth.secretConfigured;
+  const eventReceived = integration.lastSuccessAt !== null || integration.recentEvents.length > 0;
+
+  return [
+    { id: "create", label: "Create the integration", done: created, optional: false, targetTab: "overview" },
+    {
+      id: "security",
+      label: "Configure webhook security",
+      done: created && securityReady,
+      optional: false,
+      targetTab: "security",
+    },
+    {
+      id: "first-event",
+      label: "Receive your first event",
+      done: created && eventReceived,
+      optional: false,
+      targetTab: "setup",
+    },
+  ];
+}
+
+function nextStepCtaLabel(id: string) {
+  switch (id) {
+    case "create":
+      return "Create integration";
+    case "credentials":
+      return "Add credentials";
+    case "verify":
+      return "Test connection";
+    case "import":
+      return "Import calls";
+    case "security":
+      return "Configure security";
+    case "first-event":
+      return "Send a test event";
+    default:
+      return "Continue";
+  }
+}
+
+function nextStepDescription(id: string, integration: IntegrationCard) {
+  switch (id) {
+    case "create":
+      return integration.provider === "ringba"
+        ? "Create the Ringba integration so DependableQA can generate keys and store your settings."
+        : "Create the integration so DependableQA can store webhook security settings.";
+    case "credentials":
+      return "Enter your Ringba Account ID and API token, then save them in the API sync tab.";
+    case "verify":
+      return "Run a connection test to confirm DependableQA can read your Ringba Call Logs.";
+    case "import":
+      return "Pull a bounded set of recent calls so you can review what arrives before analyzing.";
+    case "security":
+      return "Set up request signing so inbound provider webhooks can be verified.";
+    case "first-event":
+      return "Send a test event (or trigger a real one) to confirm events arrive.";
+    default:
+      return "";
+  }
+}
+
+/** First incomplete required checklist item, with a tailored CTA and copy. */
+export function getIntegrationNextStep(integration: IntegrationCard): IntegrationNextStep {
+  const next = getIntegrationChecklist(integration).find((item) => !item.optional && !item.done);
+
+  if (!next) {
+    return {
+      label: "You're all set",
+      description:
+        integration.provider === "ringba"
+          ? "Ringba calls are flowing in. Review activity in Diagnostics or fine-tune scheduled sync."
+          : "This integration is receiving events. Review activity in Diagnostics.",
+      cta: null,
+      complete: true,
+    };
+  }
+
+  return {
+    label: next.label,
+    description: nextStepDescription(next.id, integration),
+    cta: { label: nextStepCtaLabel(next.id), targetTab: next.targetTab },
+    complete: false,
+  };
+}
+
+/**
+ * Per-capability readiness, so the overview can show that (for Ringba) the API
+ * connection, the real-time pixel, and the scheduled sync each have their own
+ * health — they are not one combined status. lastSuccessAt is integration-level
+ * (it can't distinguish a pixel event from an API event), so the API/sync cards
+ * lean on the API-specific lastRingbaApiSyncAt watermark instead.
+ */
+export function getIntegrationCapabilities(integration: IntegrationCard): IntegrationCapability[] {
+  const errored = hasRecentErrorActivity(integration);
+
+  if (integration.provider === "ringba") {
+    const credentialsReady = integration.ringba.apiTokenConfigured && integration.ringba.ringbaAccountId !== "";
+    const synced = integration.ringba.lastRingbaApiSyncAt !== null;
+    const pixelReady = integration.ringba.publicIngestKey !== "";
+    const pixelProven = pixelReady && integration.lastSuccessAt !== null;
+    const syncEnabled = integration.ringba.ringbaApiSyncEnabled;
+
+    return [
+      {
+        key: "api",
+        label: "API connection",
+        state: !credentialsReady ? "inactive" : errored ? "attention" : "ready",
+        detail: !credentialsReady
+          ? "Add your Account ID and token"
+          : errored
+            ? "Recent API error — check Diagnostics"
+            : synced
+              ? `Last sync ${formatIntegrationDateTime(integration.ringba.lastRingbaApiSyncAt)}`
+              : "Connected — no sync yet",
+      },
+      {
+        key: "pixel",
+        label: "Pixel ingestion",
+        state: !pixelReady ? "inactive" : !pixelProven ? "inactive" : errored ? "attention" : "ready",
+        detail: !pixelReady
+          ? "Pixel URL not generated yet"
+          : !pixelProven
+            ? "Ready — awaiting first call"
+            : errored
+              ? "Recent pixel error — check Diagnostics"
+              : "Receiving call events",
+      },
+      {
+        key: "sync",
+        label: "Scheduled sync",
+        state: !syncEnabled ? "inactive" : errored ? "attention" : "ready",
+        detail: !syncEnabled
+          ? "Off"
+          : synced
+            ? `Last run ${formatIntegrationDateTime(integration.ringba.lastRingbaApiSyncAt)}`
+            : "Enabled — first run pending",
+      },
+    ];
+  }
+
+  const securityReady = integration.webhookAuth.secretConfigured;
+  const eventReceived = integration.lastSuccessAt !== null || integration.recentEvents.length > 0;
+
+  return [
+    {
+      key: "auth",
+      label: "Webhook security",
+      state: !securityReady ? "inactive" : errored ? "attention" : "ready",
+      detail: !securityReady
+        ? "No signing secret configured"
+        : errored
+          ? "Recent error — check Diagnostics"
+          : "Signing configured",
+    },
+    {
+      key: "events",
+      label: "Inbound events",
+      state: !eventReceived ? "inactive" : errored ? "attention" : "ready",
+      detail: !eventReceived ? "No events received yet" : errored ? "Recent error — check Diagnostics" : "Receiving events",
+    },
+  ];
+}
+
 export function getDiagnosticsSummaryLine(integration: IntegrationCard) {
   if (!integration.isConfigured) {
     return "Connect this provider to start receiving diagnostics.";

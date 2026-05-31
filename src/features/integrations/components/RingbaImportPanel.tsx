@@ -204,7 +204,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
       <div>
         <div className="flex items-center gap-2 text-slate-300">
           <DownloadCloud className="h-4 w-4" />
-          <h3 className="text-lg font-semibold text-white">Ringba full API import (controlled)</h3>
+          <h3 className="text-lg font-semibold text-white">Import past calls</h3>
         </div>
         <p className="mt-1 text-sm text-slate-400">
           Pull a bounded set of Ringba call logs and recording links for a date range. Importing
@@ -215,7 +215,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Start date</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Start date</span>
           <input
             type="date"
             value={dateStart}
@@ -226,7 +226,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
           />
         </label>
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">End date</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">End date</span>
           <input
             type="date"
             value={dateEnd}
@@ -240,7 +240,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
 
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Max records (cap {MAX_RECORDS})
           </span>
           <input
@@ -254,7 +254,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
           />
         </label>
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Minimum duration (seconds)
           </span>
           <input
@@ -282,7 +282,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
       </label>
 
       <fieldset className="space-y-2" disabled={disabled}>
-        <legend className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Import behavior</legend>
+        <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">Import behavior</legend>
         {(
           [
             ["import_only", "Import only — store metadata, queue no AI"],
@@ -425,7 +425,7 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-slate-400">{label}</div>
       <div className="text-lg font-semibold text-white">{value}</div>
     </div>
   );

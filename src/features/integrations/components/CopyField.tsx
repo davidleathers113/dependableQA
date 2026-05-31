@@ -49,7 +49,7 @@ export function CopyField({
     <div className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</p>
           <p className="mt-1 break-all text-sm text-slate-100">{value || emptyLabel}</p>
         </div>
         <button

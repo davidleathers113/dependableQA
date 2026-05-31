@@ -93,7 +93,7 @@ export function IntegrationSecurityPanel({
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Auth type</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Auth type</span>
           <select
             value={authType}
             onChange={(event) => {
@@ -114,7 +114,7 @@ export function IntegrationSecurityPanel({
         </label>
 
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Header name</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Header name</span>
           <input
             value={headerName}
             onChange={(event) => setHeaderName(event.target.value)}
@@ -124,7 +124,7 @@ export function IntegrationSecurityPanel({
         </label>
 
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Prefix</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Prefix</span>
           <input
             value={prefix}
             onChange={(event) => setPrefix(event.target.value)}
@@ -135,7 +135,7 @@ export function IntegrationSecurityPanel({
         </label>
 
         <label className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Secret</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Secret</span>
           <input
             value={secret}
             onChange={(event) => setSecret(event.target.value)}
@@ -149,11 +149,11 @@ export function IntegrationSecurityPanel({
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Secret state</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Secret state</p>
           <p className="mt-2 text-sm text-slate-100">{getSecretStateLabel(integration)}</p>
         </div>
         <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Secret source</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Secret source</p>
           <p className="mt-2 text-sm text-slate-100">{getSecretSourceLabel(integration.webhookAuth.secretSource)}</p>
         </div>
       </div>

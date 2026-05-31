@@ -1,13 +1,18 @@
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Activity, DownloadCloud, KeyRound, PlugZap, Siren, SlidersHorizontal, WandSparkles, Webhook } from "lucide-react";
 import type { IntegrationsSummary } from "../../../lib/app-data";
+import { Tabs, type TabDescriptor } from "../../../components/ui/Tabs";
+import { StatusMessage } from "../../../components/ui/StatusMessage";
 import { getIntegrationProviderLabel } from "../helpers";
+import { useRingbaApiSyncForm, type RingbaApiSyncFormInput } from "../hooks/useRingbaApiSyncForm";
 import { IntegrationDiagnosticsPanel } from "./IntegrationDiagnosticsPanel";
-import { IntegrationHealthPanel } from "./IntegrationHealthPanel";
+import { IntegrationOverviewPanel } from "./IntegrationOverviewPanel";
 import { IntegrationProviderIcon } from "./IntegrationProviderIcon";
 import { IntegrationSecurityPanel } from "./IntegrationSecurityPanel";
 import { IntegrationSetupPanel } from "./IntegrationSetupPanel";
-import { RingbaApiSyncPanel, type RingbaApiSyncFormInput } from "./RingbaApiSyncPanel";
+import { RingbaAdvancedSyncFields } from "./RingbaAdvancedSyncFields";
+import { RingbaConnectionFields } from "./RingbaConnectionFields";
 import { RingbaImportPanel } from "./RingbaImportPanel";
 
 interface Props {
@@ -35,44 +40,39 @@ export function IntegrationDetailWorkspace({
 }: Props) {
   const queryClient = useQueryClient();
   const canManage = currentUserRole === "owner" || currentUserRole === "admin";
-  const [errorMessage, setErrorMessage] = React.useState("");
-  const [successMessage, setSuccessMessage] = React.useState("");
+  const isRingba = integration.provider === "ringba";
+  // Single feedback slot for in-workspace actions (save / sync / test event /
+  // create). The setter pair keeps existing call sites unchanged while routing
+  // everything through one aria-live region.
+  const [feedback, setFeedback] = React.useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const setSuccessMessage = (text: string) => setFeedback(text ? { tone: "success", text } : null);
+  const setErrorMessage = (text: string) => setFeedback(text ? { tone: "error", text } : null);
   // Dedicated, panel-local feedback for "Test connection" so the result shows
   // next to the button at the bottom of the panel — not only in the page-top
   // message box (which is off-screen when you click Test).
   const [ringbaTestNotice, setRingbaTestNotice] = React.useState<{ type: "success" | "error"; text: string } | null>(
     null
   );
-  const [highlightHealth, setHighlightHealth] = React.useState(false);
-  const [highlightSetup, setHighlightSetup] = React.useState(false);
-  const healthPanelRef = React.useRef<HTMLDivElement | null>(null);
-  const setupPanelRef = React.useRef<HTMLDivElement | null>(null);
+  const [activeTab, setActiveTab] = React.useState<string>("overview");
 
+  // Reset to Overview whenever a different integration is selected so the user
+  // never lands on a tab that doesn't exist for the new provider.
+  React.useEffect(() => {
+    setActiveTab("overview");
+  }, [integration.id]);
+
+  // Wizard completion / deep-link requests focus a section; map those to tabs.
   React.useEffect(() => {
     if (!focusSection) {
       return;
     }
-
     if (focusSection === "health") {
-      setHighlightHealth(true);
+      setActiveTab("overview");
     } else {
-      setHighlightSetup(true);
+      setActiveTab(isRingba ? "pixel" : "setup");
     }
-    window.requestAnimationFrame(() => {
-      if (focusSection === "health") {
-        healthPanelRef.current?.focus();
-      } else {
-        setupPanelRef.current?.focus();
-      }
-    });
-    const timeout = window.setTimeout(() => {
-      setHighlightHealth(false);
-      setHighlightSetup(false);
-      onFocusHandled();
-    }, 2600);
-
-    return () => window.clearTimeout(timeout);
-  }, [focusSection, onFocusHandled]);
+    onFocusHandled();
+  }, [focusSection, isRingba, onFocusHandled]);
 
   const updateMutation = useMutation({
     mutationFn: async (input: {
@@ -250,8 +250,93 @@ export function IntegrationDetailWorkspace({
     },
   });
 
+  // One form shared by the API connection tab and the Advanced tab. Called
+  // unconditionally (Rules of Hooks); harmless for non-Ringba providers.
+  const ringbaForm = useRingbaApiSyncForm({ integration, testNotice: ringbaTestNotice });
+
+  const setupPanel = (
+    <IntegrationSetupPanel
+      integration={integration}
+      canManage={canManage}
+      isTesting={testMutation.isPending}
+      isCreating={isCreatingIntegration}
+      onSendTestEvent={() => testMutation.mutate()}
+      onLaunchWizard={onLaunchWizard}
+    />
+  );
+  const diagnosticsPanel = <IntegrationDiagnosticsPanel integration={integration} />;
+  const overviewPanel = <IntegrationOverviewPanel integration={integration} onNavigate={setActiveTab} />;
+
+  const tabs: TabDescriptor[] = isRingba
+    ? [
+        { id: "overview", label: "Overview", icon: Activity, panel: overviewPanel },
+        {
+          id: "api",
+          label: "API",
+          icon: PlugZap,
+          panel: (
+            <RingbaConnectionFields
+              form={ringbaForm}
+              canManage={canManage}
+              isConfigured={integration.isConfigured}
+              isCreating={isCreatingIntegration}
+              isSaving={ringbaApiMutation.isPending}
+              isTesting={ringbaTestMutation.isPending}
+              lastRingbaApiSyncAt={integration.ringba.lastRingbaApiSyncAt}
+              testNotice={ringbaTestNotice}
+              onSave={(input) => ringbaApiMutation.mutate(input)}
+              onTestConnection={(input) => ringbaTestMutation.mutate(input)}
+            />
+          ),
+        },
+        { id: "pixel", label: "Pixel", icon: Webhook, panel: setupPanel },
+        { id: "imports", label: "Imports", icon: DownloadCloud, panel: <RingbaImportPanel integration={integration} canManage={canManage} /> },
+        { id: "diagnostics", label: "Diagnostics", icon: Siren, panel: diagnosticsPanel },
+        {
+          id: "advanced",
+          label: "Advanced",
+          icon: SlidersHorizontal,
+          panel: (
+            <RingbaAdvancedSyncFields
+              form={ringbaForm}
+              canManage={canManage}
+              isConfigured={integration.isConfigured}
+              isCreating={isCreatingIntegration}
+              isSaving={ringbaApiMutation.isPending}
+              isSyncing={ringbaSyncMutation.isPending}
+              onSave={(input) => ringbaApiMutation.mutate(input)}
+              onSyncNow={() => ringbaSyncMutation.mutate()}
+            />
+          ),
+        },
+      ]
+    : [
+        { id: "overview", label: "Overview", icon: Activity, panel: overviewPanel },
+        { id: "setup", label: "Setup", icon: WandSparkles, panel: setupPanel },
+        {
+          id: "security",
+          label: "Security",
+          icon: KeyRound,
+          panel: (
+            <IntegrationSecurityPanel
+              canManage={canManage}
+              integration={integration}
+              isSaving={updateMutation.isPending}
+              isCreating={isCreatingIntegration}
+              onCreateIntegration={onCreateIntegration}
+              onSave={(input) => updateMutation.mutate(input)}
+            />
+          ),
+        },
+        { id: "diagnostics", label: "Diagnostics", icon: Siren, panel: diagnosticsPanel },
+      ];
+
+  // Guard against a stale tab id after switching providers (before the reset
+  // effect runs) so a panel is always visible.
+  const resolvedTab = tabs.some((tab) => tab.id === activeTab) ? activeTab : "overview";
+
   return (
-    <section className="space-y-5 rounded-2xl border border-slate-800 bg-slate-950/40 p-1">
+    <section className="space-y-5">
       <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-3">
@@ -262,13 +347,13 @@ export function IntegrationDetailWorkspace({
             />
             <div>
               <h2 className="text-xl font-semibold text-white">{integration.displayName}</h2>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
                 {getIntegrationProviderLabel(integration.provider)}
               </p>
             </div>
           </div>
           <p className="max-w-xl text-sm text-slate-400">
-            {integration.provider === "ringba"
+            {isRingba
               ? "Copy the Ringba pixel URL, validate inbound event health, and troubleshoot recent activity from one workspace."
               : "Configure webhook security, copy setup values, validate the integration, and troubleshoot recent inbound activity from one workspace."}
           </p>
@@ -280,85 +365,25 @@ export function IntegrationDetailWorkspace({
           </div>
         ) : null}
 
-        {externalNotice?.type === "error" ? (
-          <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+        {externalNotice ? (
+          <StatusMessage tone={externalNotice.type} className="mt-4">
             {externalNotice.text}
-          </div>
+          </StatusMessage>
         ) : null}
-        {externalNotice?.type === "success" ? (
-          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-            {externalNotice.text}
-          </div>
-        ) : null}
-        {errorMessage ? (
-          <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-            {errorMessage}
-          </div>
-        ) : null}
-        {successMessage ? (
-          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-            {successMessage}
-          </div>
+        {feedback ? (
+          <StatusMessage tone={feedback.tone} className="mt-4">
+            {feedback.text}
+          </StatusMessage>
         ) : null}
       </div>
 
-      <div
-        ref={healthPanelRef}
-        tabIndex={-1}
-        className={`rounded-[1.1rem] outline-none transition-all duration-300 ${
-          highlightHealth
-            ? "bg-violet-500/5 shadow-[0_0_0_1px_rgba(139,92,246,0.65),0_0_0_8px_rgba(139,92,246,0.08),0_0_48px_rgba(139,92,246,0.18)]"
-            : ""
-        }`}
-      >
-        <IntegrationHealthPanel integration={integration} />
-      </div>
-      <div
-        ref={setupPanelRef}
-        tabIndex={-1}
-        className={`rounded-[1.1rem] outline-none transition-all duration-300 ${
-          highlightSetup
-            ? "bg-violet-500/5 shadow-[0_0_0_1px_rgba(139,92,246,0.65),0_0_0_8px_rgba(139,92,246,0.08),0_0_48px_rgba(139,92,246,0.18)]"
-            : ""
-        }`}
-      >
-        <IntegrationSetupPanel
-          integration={integration}
-          canManage={canManage}
-          isTesting={testMutation.isPending}
-          isCreating={isCreatingIntegration}
-          onSendTestEvent={() => testMutation.mutate()}
-          onLaunchWizard={onLaunchWizard}
-        />
-      </div>
-      {integration.provider === "ringba" ? (
-        <>
-          <RingbaApiSyncPanel
-            integration={integration}
-            canManage={canManage}
-            isSaving={ringbaApiMutation.isPending}
-            isCreating={isCreatingIntegration}
-            isSyncing={ringbaSyncMutation.isPending}
-            isTesting={ringbaTestMutation.isPending}
-            testNotice={ringbaTestNotice}
-            onSave={(input) => ringbaApiMutation.mutate(input)}
-            onSyncNow={() => ringbaSyncMutation.mutate()}
-            onTestConnection={(input) => ringbaTestMutation.mutate(input)}
-          />
-          <RingbaImportPanel integration={integration} canManage={canManage} />
-        </>
-      ) : null}
-      {integration.provider !== "ringba" ? (
-        <IntegrationSecurityPanel
-          canManage={canManage}
-          integration={integration}
-          isSaving={updateMutation.isPending}
-          isCreating={isCreatingIntegration}
-          onCreateIntegration={onCreateIntegration}
-          onSave={(input) => updateMutation.mutate(input)}
-        />
-      ) : null}
-      <IntegrationDiagnosticsPanel integration={integration} />
+      <Tabs
+        tabs={tabs}
+        value={resolvedTab}
+        onValueChange={setActiveTab}
+        idBase={`integration-${integration.id}`}
+        ariaLabel={`${integration.displayName} workspace`}
+      />
     </section>
   );
 }

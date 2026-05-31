@@ -1,4 +1,15 @@
 import * as React from 'react';
+import {
+  LayoutDashboard,
+  Phone,
+  Upload,
+  Cable,
+  BarChart3,
+  CreditCard,
+  Settings as SettingsIcon,
+  Bell,
+  type LucideIcon,
+} from 'lucide-react';
 
 interface SessionPayload {
   user: { id: string; email: string };
@@ -13,19 +24,42 @@ interface Props {
   children: React.ReactNode;
 }
 
-const primaryNav = [
-  { label: 'Overview', href: '/app/overview', icon: '📊' },
-  { label: 'Calls', href: '/app/calls', icon: '📞' },
-  { label: 'Imports', href: '/app/imports', icon: '📤' },
-  { label: 'Integrations', href: '/app/integrations', icon: '🔗' },
-  { label: 'Reports', href: '/app/reports', icon: '📈' },
+interface NavItem {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+}
+
+const primaryNav: NavItem[] = [
+  { label: 'Overview', href: '/app/overview', icon: LayoutDashboard },
+  { label: 'Calls', href: '/app/calls', icon: Phone },
+  { label: 'Imports', href: '/app/imports', icon: Upload },
+  { label: 'Integrations', href: '/app/integrations', icon: Cable },
+  { label: 'Reports', href: '/app/reports', icon: BarChart3 },
 ];
 
-const secondaryNav = [
-  { label: 'Billing', href: '/app/billing', icon: '💳' },
-  { label: 'Settings', href: '/app/settings/profile', icon: '⚙️' },
-  { label: 'Updates', href: '/app/updates', icon: '🔔' },
+const secondaryNav: NavItem[] = [
+  { label: 'Billing', href: '/app/billing', icon: CreditCard },
+  { label: 'Settings', href: '/app/settings/profile', icon: SettingsIcon },
+  { label: 'Updates', href: '/app/updates', icon: Bell },
 ];
+
+function NavLink({ item, currentPath }: { item: NavItem; currentPath: string }) {
+  const active = currentPath.startsWith(item.href);
+  const Icon = item.icon;
+  return (
+    <a
+      href={item.href}
+      aria-current={active ? 'page' : undefined}
+      className={`flex items-center px-3 py-2 text-sm font-medium rounded-xl transition-colors ${
+        active ? 'bg-violet-600/20 text-violet-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+      }`}
+    >
+      <Icon className="mr-3 h-4 w-4" aria-hidden />
+      <span>{item.label}</span>
+    </a>
+  );
+}
 
 export default function AppShell({ title, session, currentPath, children }: Props) {
   // currentPath comes from the server (Astro.url.pathname) and is passed as a
@@ -45,18 +79,7 @@ export default function AppShell({ title, session, currentPath, children }: Prop
             <nav className="flex-1 px-4 py-6 space-y-8">
               <div className="space-y-1">
                 {primaryNav.map((item) => (
-                  <a
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center px-3 py-2 text-sm font-medium rounded-xl transition-colors ${
-                      currentPath.startsWith(item.href)
-                        ? "bg-violet-600/20 text-violet-400"
-                        : "text-slate-400 hover:text-white hover:bg-slate-800"
-                    }`}
-                  >
-                    <span className="mr-3">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </a>
+                  <NavLink key={item.href} item={item} currentPath={currentPath} />
                 ))}
               </div>
 
@@ -65,18 +88,7 @@ export default function AppShell({ title, session, currentPath, children }: Prop
                   Support
                 </h3>
                 {secondaryNav.map((item) => (
-                  <a
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center px-3 py-2 text-sm font-medium rounded-xl transition-colors ${
-                      currentPath.startsWith(item.href)
-                        ? "bg-violet-600/20 text-violet-400"
-                        : "text-slate-400 hover:text-white hover:bg-slate-800"
-                    }`}
-                  >
-                    <span className="mr-3">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </a>
+                  <NavLink key={item.href} item={item} currentPath={currentPath} />
                 ))}
               </div>
             </nav>
@@ -98,7 +110,7 @@ export default function AppShell({ title, session, currentPath, children }: Prop
       {/* Main Content */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <header className="h-16 flex items-center justify-between px-8 border-b border-slate-800 bg-slate-900/50">
-          <h2 className="text-xl font-semibold text-white">{title}</h2>
+          <h1 className="text-xl font-semibold text-white">{title}</h1>
           <div className="flex items-center space-x-4">
             <div className="h-8 w-px bg-slate-800 mx-2"></div>
             <div className="text-sm font-medium text-slate-400">
