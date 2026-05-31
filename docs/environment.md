@@ -43,6 +43,9 @@ Bump the prompt/schema versions to force re-analysis (see [ai-pipeline](ai-pipel
 | `INTEGRATION_INGEST_SHARED_SECRET` | yes | Default integration webhook secret |
 | `INTEGRATION_INGEST_SIGNATURE_HEADER` | no | Default `x-dependableqa-signature` |
 | `INTEGRATION_INGEST_SIGNATURE_PREFIX` | no | Default `sha256=` |
+| `RECORDING_HOST_ALLOWLIST` | no | SSRF allowlist for recording fetch/preflight |
+
+`RECORDING_HOST_ALLOWLIST` is a comma-separated list of domain suffixes (e.g. `ringba.com,amazonaws.com`). A recording host is allowed when it equals an entry or is a subdomain of one; matching is exact/`endsWith` on host labels (no regex). It is enforced on the initial host **and every redirect hop** in both `recording-fetch.ts` and `recording-preflight.ts`. Leave it empty to disable the allowlist and rely only on the private-IP/DNS guards (defense-in-depth, which always run). Connect-time IP pinning via a custom dispatcher remains a noted follow-on for the residual DNS-rebinding TOCTOU window.
 
 ## Stripe / billing
 

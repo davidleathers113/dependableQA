@@ -106,6 +106,18 @@ describe("probeRecordingReadiness", () => {
     );
   });
 
+  it("blocks a host outside RECORDING_HOST_ALLOWLIST before fetching (unreachable)", async () => {
+    process.env.RECORDING_HOST_ALLOWLIST = "ringba.com";
+    // Even a would-be-ready response can't save a disallowed host: the allowlist
+    // throws in assertSafeRecordingUrl before any request is issued, on both the
+    // HEAD and ranged-GET paths, so the probe classifies it unreachable.
+    stubFetchByMethod(() => fakeResponse({ status: 200, headers: { "content-type": "audio/mpeg" } }));
+    expect(await probeRecordingReadiness("https://evil.example.com/r", { maxBytes: 25 * MB })).toBe(
+      "unreachable"
+    );
+    delete process.env.RECORDING_HOST_ALLOWLIST;
+  });
+
   it("uses the final redirected URL path for the extension fallback", async () => {
     // Original URL has no audio hint in its path; it 302-redirects to an S3
     // key ending in `.mp3`. The body is unrecognizable and the content-type is

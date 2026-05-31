@@ -84,6 +84,39 @@ describe("assertSafeRecordingUrl", () => {
   });
 });
 
+describe("assertSafeRecordingUrl host allowlist (RECORDING_HOST_ALLOWLIST)", () => {
+  afterEach(() => {
+    delete process.env.RECORDING_HOST_ALLOWLIST;
+  });
+
+  it("allows a host under an allowlisted domain suffix", () => {
+    process.env.RECORDING_HOST_ALLOWLIST = "ringba.com, amazonaws.com";
+    expect(assertSafeRecordingUrl("https://media.ringba.com/r.mp3").hostname).toBe("media.ringba.com");
+    expect(assertSafeRecordingUrl("https://recordings.s3.amazonaws.com/r.mp3").hostname).toBe(
+      "recordings.s3.amazonaws.com"
+    );
+  });
+
+  it("allows an exact host match and tolerates leading dots in entries", () => {
+    process.env.RECORDING_HOST_ALLOWLIST = ".ringba.com";
+    expect(assertSafeRecordingUrl("https://ringba.com/r.mp3").hostname).toBe("ringba.com");
+  });
+
+  it("rejects a host outside the allowlist", () => {
+    process.env.RECORDING_HOST_ALLOWLIST = "ringba.com";
+    expect(() => assertSafeRecordingUrl("https://evil.example.com/r.mp3")).toThrow("not in the allowlist");
+  });
+
+  it("does not match a look-alike suffix", () => {
+    process.env.RECORDING_HOST_ALLOWLIST = "ringba.com";
+    expect(() => assertSafeRecordingUrl("https://evilringba.com/r.mp3")).toThrow("not in the allowlist");
+  });
+
+  it("enforces nothing when unset (public host passes)", () => {
+    expect(assertSafeRecordingUrl("https://media.ringba.com/r.mp3").hostname).toBe("media.ringba.com");
+  });
+});
+
 describe("resolveAudioExtension", () => {
   it("detects wav from magic bytes even when content-type lies", () => {
     expect(resolveAudioExtension(wavBytes(), "application/octet-stream", "/recording")).toBe(".wav");
@@ -153,6 +186,17 @@ describe("fetchRecordingWithGuards", () => {
     await expect(
       fetchRecordingWithGuards("https://media.ringba.com/r", { maxBytes: 25 * MB })
     ).rejects.toThrow("private or loopback");
+  });
+
+  it("rejects a redirect that leaves the host allowlist", async () => {
+    process.env.RECORDING_HOST_ALLOWLIST = "ringba.com";
+    stubFetchSequence([
+      () => fakeResponse({ status: 302, headers: { location: "https://evil.example.com/x.mp3" } }),
+    ]);
+    await expect(
+      fetchRecordingWithGuards("https://media.ringba.com/r", { maxBytes: 25 * MB })
+    ).rejects.toThrow("not in the allowlist");
+    delete process.env.RECORDING_HOST_ALLOWLIST;
   });
 
   it("rejects after exceeding the redirect budget", async () => {

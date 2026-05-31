@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
+import { z } from "zod";
 
 /**
  * Shared, hardened recording fetcher used by transcription (and, later, by
@@ -44,6 +45,40 @@ export function createNonRetryableError(message: string): NonRetryableError {
 }
 
 // ---- SSRF host validation -------------------------------------------------
+
+// Optional provider allowlist. Recording URLs are attacker-influenced and chase
+// redirects, so the private-IP/DNS guards are defense-in-depth but cannot stop a
+// public attacker-controlled host. When RECORDING_HOST_ALLOWLIST is set, only
+// hosts under those domains may be fetched (enforced on the initial host AND
+// every redirect hop, since both fetchers re-run assertSafeRecordingUrl per
+// hop). Unset/empty => allowlist disabled (rely on the IP/DNS guards), so
+// existing deployments are unaffected until they opt in.
+//
+// Entries are domain suffixes: `ringba.com` matches `ringba.com` and any
+// subdomain `*.ringba.com`. Matching is exact/`endsWith` on host labels — no
+// regex (project rule; also avoids ReDoS on attacker input).
+const allowlistSchema = z.array(z.string().trim().toLowerCase().min(1));
+
+function normalizeAllowlistEntry(entry: string): string {
+  const lower = entry.trim().toLowerCase();
+  // Tolerate leading dots ("`.amazonaws.com`") and a trailing FQDN dot.
+  const withoutLeadingDot = lower.startsWith(".") ? lower.slice(1) : lower;
+  return withoutLeadingDot.endsWith(".") ? withoutLeadingDot.slice(0, -1) : withoutLeadingDot;
+}
+
+function getRecordingHostAllowlist(): string[] | null {
+  const raw = process.env.RECORDING_HOST_ALLOWLIST?.trim();
+  if (!raw) return null;
+  const entries = allowlistSchema
+    .parse(raw.split(","))
+    .map(normalizeAllowlistEntry)
+    .filter((entry) => entry.length > 0);
+  return entries.length > 0 ? entries : null;
+}
+
+function hostMatchesAllowlist(hostname: string, allowlist: string[]): boolean {
+  return allowlist.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`));
+}
 
 function isBlockedIpv4Host(hostname: string) {
   const parts = hostname.split(".").map((part) => Number(part));
@@ -133,6 +168,11 @@ export function assertSafeRecordingUrl(urlText: string): URL {
 
   if (isBlockedIpAddress(hostname)) {
     throw createNonRetryableError("Recording URL must not target a private or loopback host.");
+  }
+
+  const allowlist = getRecordingHostAllowlist();
+  if (allowlist && !hostMatchesAllowlist(hostname, allowlist)) {
+    throw createNonRetryableError("Recording URL host is not in the allowlist.");
   }
 
   return parsedUrl;
