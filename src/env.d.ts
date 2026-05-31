@@ -20,6 +20,13 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
+// Build-time constants injected by Vite `define` in astro.config.ts. They are
+// textually inlined at build, so deployed code reports the exact commit/build
+// it was built from (see /api/version). Absent in unit tests/dev (guard with
+// `typeof`), where they resolve to "unknown".
+declare const __APP_BUILD_SHA__: string;
+declare const __APP_BUILD_TIME__: string;
+
 declare namespace App {
   interface Locals {
     supabase: import("@supabase/supabase-js").SupabaseClient<import("../supabase/types").Database>;
