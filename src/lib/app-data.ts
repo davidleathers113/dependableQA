@@ -258,6 +258,60 @@ export interface CallSavedViewConfig {
   visibleColumns?: string[];
 }
 
+/**
+ * Ordered first-run setup steps. The keys map to the four things a new org must
+ * do before the product is doing useful work, in the order the Overview
+ * "Getting started" checklist presents them. Display copy/links live in the
+ * presentational component; this layer only reports each step's done-state so it
+ * stays pure and unit-testable.
+ */
+export type SetupStepKey = "funds" | "source" | "analyze" | "review";
+
+export interface SetupStep {
+  key: SetupStepKey;
+  done: boolean;
+}
+
+export interface SetupChecklist {
+  /** True once every step is done — the UI hides the checklist in that case. */
+  complete: boolean;
+  completedCount: number;
+  totalCount: number;
+  steps: SetupStep[];
+}
+
+/**
+ * Pure derivation of the first-run checklist from already-loaded org signals.
+ * Kept separate from the DB query so it can be exhaustively unit-tested.
+ *
+ * - `funds`   — wallet has a positive balance (paid AI analysis is possible).
+ * - `source`  — calls are flowing in: either a provider is connected OR at least
+ *               one call exists (CSV-only orgs satisfy this without an integration).
+ * - `analyze` — at least one call has completed AI analysis.
+ * - `review`  — at least one call has reached the `reviewed` state.
+ */
+export function deriveSetupChecklist(input: {
+  balanceCents: number;
+  hasIntegration: boolean;
+  hasCalls: boolean;
+  hasAnalyzedCall: boolean;
+  hasReviewedCall: boolean;
+}): SetupChecklist {
+  const steps: SetupStep[] = [
+    { key: "funds", done: input.balanceCents > 0 },
+    { key: "source", done: input.hasIntegration || input.hasCalls },
+    { key: "analyze", done: input.hasAnalyzedCall },
+    { key: "review", done: input.hasReviewedCall },
+  ];
+  const completedCount = steps.filter((step) => step.done).length;
+  return {
+    steps,
+    completedCount,
+    totalCount: steps.length,
+    complete: completedCount === steps.length,
+  };
+}
+
 export interface OverviewData {
   balanceCents: number;
   projectedDaysRemaining: number | null;
@@ -265,6 +319,7 @@ export interface OverviewData {
   minutesProcessed: number;
   flagRate: number;
   openFlagCount: number;
+  setup: SetupChecklist;
   needsAttention: Array<{ title: string; description: string; tone: "critical" | "warning" | "info" }>;
   recentActivity: Array<{ type: string; message: string; createdAt: string }>;
 }
@@ -2027,7 +2082,7 @@ export async function getOverviewData(client: SupabaseAny, organizationId: strin
     client.from("import_batches").select("id, filename, status, created_at").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(3),
     client.from("integration_events").select("id, message, severity, created_at").eq("organization_id", organizationId).order("created_at", { ascending: false }).limit(3),
     client.from("calls").select("duration_seconds", { count: "exact" }).eq("organization_id", organizationId).gte("started_at", monthStart),
-    client.from("calls").select("id, flag_count, duration_seconds").eq("organization_id", organizationId),
+    client.from("calls").select("id, flag_count, duration_seconds, analysis_completed_at, current_review_status").eq("organization_id", organizationId),
     client.from("integrations").select("id, display_name, status").eq("organization_id", organizationId).order("updated_at", { ascending: false }).limit(3),
     client.from("wallet_ledger_entries").select("balance_after_cents, created_at").eq("organization_id", organizationId).order("seq", { ascending: false }).limit(1).maybeSingle(),
   ]);
@@ -2045,6 +2100,8 @@ export async function getOverviewData(client: SupabaseAny, organizationId: strin
   const allCalls = ((allCallsResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
     durationSeconds: asNumber(row.duration_seconds),
     flagCount: asNumber(row.flag_count),
+    analysisCompletedAt: row.analysis_completed_at,
+    reviewStatus: asString(row.current_review_status),
   }));
 
   const totalMinutes = allCalls.reduce((total, row) => total + row.durationSeconds, 0) / 60;
@@ -2053,6 +2110,14 @@ export async function getOverviewData(client: SupabaseAny, organizationId: strin
   const monthlyMinutes = monthlyCalls.reduce((total, seconds) => total + seconds, 0) / 60;
   const burnRate = monthlyMinutes > 0 ? monthlyMinutes / new Date().getUTCDate() : 0;
   const projectedDaysRemaining = burnRate > 0 ? Math.floor((currentBalance / 100) / burnRate) : null;
+
+  const setup = deriveSetupChecklist({
+    balanceCents: currentBalance,
+    hasIntegration: ((integrationsResult.data ?? []) as unknown[]).length > 0,
+    hasCalls: allCalls.length > 0,
+    hasAnalyzedCall: allCalls.some((row) => row.analysisCompletedAt != null),
+    hasReviewedCall: allCalls.some((row) => row.reviewStatus === "reviewed"),
+  });
 
   const needsAttention: OverviewData["needsAttention"] = [];
 
@@ -2106,6 +2171,7 @@ export async function getOverviewData(client: SupabaseAny, organizationId: strin
     minutesProcessed: Math.round(totalMinutes),
     flagRate: allCalls.length === 0 ? 0 : Number(((flaggedCalls / allCalls.length) * 100).toFixed(1)),
     openFlagCount: openFlagsResult.count ?? 0,
+    setup,
     needsAttention: needsAttention.slice(0, 3),
     recentActivity: recentActivity.slice(0, 5),
   };

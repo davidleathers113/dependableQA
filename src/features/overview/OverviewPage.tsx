@@ -3,6 +3,7 @@ import { QueryProvider } from "../../components/providers/QueryProvider";
 import { formatCurrency, getOverviewData, type OverviewData } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
 import { LocalTime } from "../../components/ui/LocalTime";
+import GettingStartedChecklist from "./GettingStartedChecklist";
 
 interface Props {
   organizationId: string;
@@ -33,6 +34,8 @@ function OverviewPageInner({ organizationId, initialData }: Props) {
           Organization ID: <span className="font-mono text-xs">{organizationId}</span>
         </div>
       </div>
+
+      <GettingStartedChecklist setup={data.setup} />
 
       {/* KPI Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

@@ -4,6 +4,7 @@ import {
   buildCallFilters,
   deriveBillingHealthSummary,
   deriveBillingRunwaySummary,
+  deriveSetupChecklist,
   filtersToSearchParams,
   getIntegrationsSummary,
   getOverviewData,
@@ -325,6 +326,65 @@ describe("integrations summary helpers", () => {
         minimumDurationSeconds: 30,
       },
     });
+  });
+});
+
+describe("deriveSetupChecklist", () => {
+  const NOTHING = {
+    balanceCents: 0,
+    hasIntegration: false,
+    hasCalls: false,
+    hasAnalyzedCall: false,
+    hasReviewedCall: false,
+  };
+
+  it("reports all four steps incomplete for a brand-new org", () => {
+    const checklist = deriveSetupChecklist(NOTHING);
+    expect(checklist.totalCount).toBe(4);
+    expect(checklist.completedCount).toBe(0);
+    expect(checklist.complete).toBe(false);
+    expect(checklist.steps.map((step) => step.key)).toEqual(["funds", "source", "analyze", "review"]);
+    expect(checklist.steps.every((step) => !step.done)).toBe(true);
+  });
+
+  it("marks the funds step done only when the balance is positive", () => {
+    expect(deriveSetupChecklist({ ...NOTHING, balanceCents: 1 }).steps[0].done).toBe(true);
+    expect(deriveSetupChecklist({ ...NOTHING, balanceCents: 0 }).steps[0].done).toBe(false);
+    // A negative balance must not count as funded.
+    expect(deriveSetupChecklist({ ...NOTHING, balanceCents: -50 }).steps[0].done).toBe(false);
+  });
+
+  it("satisfies the source step with either an integration or imported calls", () => {
+    const source = (input: Partial<typeof NOTHING>) =>
+      deriveSetupChecklist({ ...NOTHING, ...input }).steps[1].done;
+    expect(source({ hasIntegration: true })).toBe(true);
+    expect(source({ hasCalls: true })).toBe(true);
+    expect(source({})).toBe(false);
+  });
+
+  it("is complete only when every step is satisfied", () => {
+    const checklist = deriveSetupChecklist({
+      balanceCents: 5000,
+      hasIntegration: true,
+      hasCalls: true,
+      hasAnalyzedCall: true,
+      hasReviewedCall: true,
+    });
+    expect(checklist.completedCount).toBe(4);
+    expect(checklist.complete).toBe(true);
+  });
+
+  it("stays incomplete when only the final review step is missing", () => {
+    const checklist = deriveSetupChecklist({
+      balanceCents: 5000,
+      hasIntegration: true,
+      hasCalls: true,
+      hasAnalyzedCall: true,
+      hasReviewedCall: false,
+    });
+    expect(checklist.completedCount).toBe(3);
+    expect(checklist.complete).toBe(false);
+    expect(checklist.steps[3]).toEqual({ key: "review", done: false });
   });
 });
 
