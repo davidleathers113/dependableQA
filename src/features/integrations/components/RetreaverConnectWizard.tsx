@@ -4,6 +4,7 @@ import { getWebhookEndpointUrl } from "../helpers";
 import { getRetreaverWizardSteps } from "../wizard-content";
 import { IntegrationSetupWizardDialog } from "./IntegrationSetupWizardDialog";
 import { IntegrationWizardStep } from "./IntegrationWizardStep";
+import { RetreaverSetupValues } from "./RetreaverSetupValues";
 
 interface Props {
   integration: IntegrationCard;
@@ -14,7 +15,19 @@ interface Props {
 
 export function RetreaverConnectWizard({ integration, isOpen, onClose, onComplete }: Props) {
   const endpoint = React.useMemo(() => getWebhookEndpointUrl(), []);
-  const steps = React.useMemo(() => getRetreaverWizardSteps(endpoint), [endpoint]);
+  const steps = React.useMemo(
+    () =>
+      getRetreaverWizardSteps(endpoint, {
+        // Only show the real ID once the integration exists (placeholders carry a
+        // catalog fallback id that isn't a usable x-integration-id value).
+        integrationId: integration.isConfigured ? integration.id : undefined,
+        authType: integration.webhookAuth.authType,
+        headerName: integration.webhookAuth.headerName,
+        prefix: integration.webhookAuth.prefix,
+        secretConfigured: integration.webhookAuth.secretConfigured,
+      }),
+    [endpoint, integration]
+  );
   const [stepIndex, setStepIndex] = React.useState(0);
 
   React.useEffect(() => {
@@ -51,6 +64,12 @@ export function RetreaverConnectWizard({ integration, isOpen, onClose, onComplet
       onNext={handleNext}
     >
       <IntegrationWizardStep {...steps[stepIndex]!} />
+      <RetreaverSetupValues
+        endpoint={endpoint}
+        integrationId={integration.isConfigured ? integration.id : ""}
+        headerName={integration.webhookAuth.headerName}
+        secretConfigured={integration.webhookAuth.secretConfigured}
+      />
     </IntegrationSetupWizardDialog>
   );
 }

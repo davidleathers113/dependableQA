@@ -170,7 +170,48 @@ export function getRingbaWizardSteps(): RingbaWizardStepContent[] {
   ];
 }
 
-export function getRetreaverWizardSteps(endpoint: string): IntegrationWizardStepContent[] {
+/**
+ * Live values from the active integration used to make the Retreaver setup copy
+ * concrete. All optional — when a value is absent the copy stays explicit about
+ * where to find it instead of inventing it. The signing secret value is never
+ * passed in (only whether one is configured).
+ */
+export interface RetreaverWizardContext {
+  integrationId?: string;
+  authType?: string;
+  headerName?: string;
+  prefix?: string;
+  secretConfigured?: boolean;
+}
+
+function buildRetreaverHeaderBullets(context: RetreaverWizardContext | undefined): {
+  bullets: string[];
+  note: string;
+} {
+  const idBullet = context?.integrationId
+    ? `x-integration-id: ${context.integrationId} (identifies this integration and its organization — never put an org id in the body)`
+    : "x-integration-id: this integration's ID (finish creating the integration, then copy its ID from the Security tab; the org is resolved from it server-side)";
+
+  const headerName = context?.headerName || "x-dependableqa-signature";
+  const prefix = context?.prefix || "sha256=";
+  const signingBullet =
+    context?.authType === "shared-secret"
+      ? `${headerName}: send the configured shared secret value`
+      : `${headerName}: send ${prefix}<HMAC-SHA256 of the raw JSON body> using the configured secret`;
+
+  const note =
+    context?.secretConfigured === false
+      ? "No signing secret is configured yet — set one on this integration's Security tab before sending live traffic."
+      : "Manage the exact signing header name and secret on this integration's Security tab.";
+
+  return { bullets: [idBullet, signingBullet], note };
+}
+
+export function getRetreaverWizardSteps(
+  endpoint: string,
+  context?: RetreaverWizardContext
+): IntegrationWizardStepContent[] {
+  const header = buildRetreaverHeaderBullets(context);
   return [
     {
       title: "Open the campaign webhook settings",
@@ -190,8 +231,32 @@ export function getRetreaverWizardSteps(endpoint: string): IntegrationWizardStep
     },
     {
       title: "Paste the DependableQA webhook URL",
-      description: "Use the complete webhook URL below when saving the Retreaver webhook.",
+      description: "Use the complete webhook URL below when saving the Retreaver webhook. Webhook is the recommended Retreaver path.",
       bullets: [`Webhook URL: ${endpoint}`],
+    },
+    {
+      title: "Set the request headers",
+      description: "DependableQA verifies and routes the call using two headers.",
+      bullets: header.bullets,
+      note: header.note,
+    },
+    {
+      title: "Send one JSON call per webhook",
+      description: "POST a flat per-call JSON body. Field names accept common Retreaver token aliases.",
+      bullets: [
+        "Required: caller (caller_id / caller_number) and a start time (started_at / created_at / start_time / timestamp)",
+        "Identifiers: call_uuid / call_id / uuid",
+        "Optional: number_called, duration (or total_duration), recording_url when a recording is available",
+      ],
+      note: "Imported calls are metadata-only — AI transcription/analysis is never auto-run; queue it later from the Calls list.",
+    },
+    {
+      title: "Test-fire one call and confirm",
+      description: "Use Retreaver's test-fire (or trigger a real call) to send a single webhook.",
+      bullets: [
+        "Open this integration's Diagnostics tab to confirm the call arrived",
+        "A rejected call shows the reason there (e.g. invalid payload or failed signature) instead of silently dropping",
+      ],
     },
   ];
 }

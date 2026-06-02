@@ -8,6 +8,7 @@ import {
   verifyWebhookRequest,
 } from "../../src/server/integration-ingest";
 import { getHeaderValue, parseNetlifyRequestBody } from "../../src/server/netlify-request";
+import { ingestRetreaverWebhookCall } from "../../src/server/retreaver-ingest";
 
 function json(statusCode: number, body: Record<string, unknown>) {
   return {
@@ -96,6 +97,36 @@ export async function handler(event: {
       errorType: "integration.webhook.rejected",
     });
     return json(400, { error: message });
+  }
+
+  // Retreaver fires per-call webhooks with token-style keys (caller_id, call_uuid, …)
+  // that the generic call extractor doesn't recognize, so route them through the
+  // Retreaver adapter. Verification + integration/org scoping above are unchanged;
+  // this path is metadata-only (enqueueAiJobs:false inside the adapter).
+  if (integration.provider === "retreaver") {
+    const retreaverResult = await ingestRetreaverWebhookCall({
+      client: admin,
+      integration,
+      payload: parsedPayload.payload,
+    });
+
+    if (retreaverResult.status === "ignored") {
+      await recordIntegrationFailure(admin, integration, {
+        eventType: "webhook.rejected",
+        message: `Rejected ${integration.displayName} webhook: payload did not contain a usable call.`,
+        payload: {
+          reason: "invalid_payload",
+        },
+        errorType: "integration.webhook.rejected",
+      });
+      return json(400, { error: "Webhook payload did not contain a usable call." });
+    }
+
+    return json(200, {
+      ok: retreaverResult.rejectedCount === 0,
+      ingestedCount: retreaverResult.ingestedCount,
+      rejectedCount: retreaverResult.rejectedCount,
+    });
   }
 
   if (parsedPayload.calls.length === 0) {

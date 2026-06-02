@@ -1,7 +1,7 @@
 ---
 title: Integrations & Ingestion
 owner: Engineering
-last-reviewed: 2026-05-27
+last-reviewed: 2026-06-02
 ---
 
 # Integrations & Ingestion
@@ -34,6 +34,43 @@ The webhook, pixel, and API-sync paths funnel into the shared ingestion logic in
 - **`hmac-sha256`** — HMAC of the raw body, compared against a signature header. Header name and prefix are configurable, defaulting to `INTEGRATION_INGEST_SIGNATURE_HEADER` (`x-dependableqa-signature`) and prefix `sha256=`.
 
 Auth config resolution falls back across `webhookAuth.*`, legacy `sharedSecret`/`signatureHeader`/`signaturePrefix` keys, and the env defaults, so older integration records keep working.
+
+## Retreaver webhook
+
+Retreaver is wired into the shared webhook path (`netlify/functions/integration-ingest.ts`). The
+recommended Retreaver integration is a campaign **webhook**, configured to POST a JSON body with one
+call per fire, or an explicit batch wrapper when Retreaver/custom middleware sends multiple calls at once.
+
+- **Endpoint / scoping:** POST to the same webhook endpoint as other providers, with the
+  `x-integration-id` header set to the integration's id. Org/tenant is resolved from that
+  integration record (`loadIntegrationContext`) — a body-supplied org id is never trusted.
+- **Auth:** the standard webhook auth above (`shared-secret` or `hmac-sha256`). **HMAC signs the
+  raw JSON body** for this implementation (default header `x-dependableqa-signature`, prefix `sha256=`).
+  Verification runs before any Retreaver-specific handling; a failure returns 401 and records a
+  `webhook.rejected` event.
+- **Payload:** either a **flat per-call JSON object** or an explicit batch wrapper:
+  `{ "calls": [ { ... }, { ... } ] }`. Field names accept common Retreaver token aliases, normalized
+  in `src/server/retreaver-webhook.ts`:
+  - caller (**required**): `caller_id` / `caller_number` / `caller` / `phone_number`
+  - start time (**required**): `started_at` / `start_time` / `created_at` / `timestamp` (ISO or epoch)
+  - external id: `call_uuid` / `call_id` / `uuid` / `id`
+  - destination: `number_called` / `destination_number` / `dialed_number`
+  - duration: `duration` / `duration_seconds` / `total_duration` / `call_duration`
+  - recording: `recording_url` / `recording` / `audio_url`
+  - publisher/source: `publisher` / `affiliate` / `source` (+ `_id` forms); buyer: `buyer` / `handler_id` / `target`
+- **Routing:** verified Retreaver payloads go through `ingestRetreaverWebhookCall`
+  (`src/server/retreaver-ingest.ts`), which ingests **metadata-only (`enqueueAiJobs: false`)** — a
+  Retreaver call never auto-triggers transcription/analysis; AI is queued explicitly via the
+  analyze-selected gate. A payload or batch with no usable calls is rejected with a `webhook.rejected`
+  (`invalid_payload`) event and a 400. In a mixed batch, usable calls are ingested and unusable entries
+  are counted as rejected.
+
+**Current limitations (intentional, to be lifted in later slices):**
+
+- **JSON only.** URL-param / `GET` delivery is **not** supported by this route (the path requires a
+  JSON body); use Retreaver's JSON webhook.
+- The `buyer`/`handler_id` value is normalized but has no dedicated `calls` column yet, so it is not
+  persisted by `ingestIntegrationCalls`.
 
 ## Ringba pixel (`/api/integrations/ringba/pixel`)
 
