@@ -3,6 +3,7 @@ import { QueryProvider } from "../../components/providers/QueryProvider";
 import { getReportsSummary, type ReportsSummary } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
 import { LocalTime } from "../../components/ui/LocalTime";
+import { buildReportsCsv, buildReportsCsvFilename } from "./reportsCsv";
 
 interface Props {
   organizationId: string;
@@ -17,6 +18,17 @@ function ReportsPageInner({ organizationId, initialData }: Props) {
   });
 
   const data = reportsQuery.data;
+
+  const exportCsv = () => {
+    const csv = buildReportsCsv(data);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = buildReportsCsvFilename();
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
 
   return (
     <section className="space-y-6">
@@ -37,10 +49,10 @@ function ReportsPageInner({ organizationId, initialData }: Props) {
           </button>
           <button
             type="button"
-            disabled
-            className="h-10 rounded-xl bg-slate-800 px-4 text-sm font-bold text-slate-500"
+            onClick={exportCsv}
+            className="h-10 rounded-xl bg-violet-600 px-4 text-sm font-bold text-white transition-colors hover:bg-violet-500"
           >
-            Export PDF Soon
+            Export CSV
           </button>
         </div>
       </header>
