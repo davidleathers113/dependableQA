@@ -5,10 +5,83 @@ import {
   formatIntegrationRelativeTime,
   getDiagnosticsSummary,
   getDiagnosticsSummaryLine,
+  getIntegrationPreTrafficGuide,
+  type IntegrationPreTrafficGuide,
+  type IntegrationWorkspaceTab,
 } from "../helpers";
 
 interface Props {
   integration: IntegrationCard;
+  /** Jump to a workspace tab (e.g. from the verify-now callout). Omit to render the callout as static text. */
+  onNavigate?: (tab: IntegrationWorkspaceTab) => void;
+}
+
+/**
+ * Pre-traffic empty state: frames "no events yet" as expected, surfaces the next
+ * verification the user can run now, and lists what will appear after the first
+ * call — so a missing call reads as "no traffic yet" vs a setup problem.
+ */
+function PreTrafficGuide({
+  guide,
+  onNavigate,
+}: {
+  guide: IntegrationPreTrafficGuide;
+  onNavigate?: (tab: IntegrationWorkspaceTab) => void;
+}) {
+  const verify = guide.verifyNow;
+
+  return (
+    <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950 px-4 py-4">
+      <div>
+        <p className="text-sm font-semibold text-white">No calls have arrived yet</p>
+        <p className="mt-1 text-sm text-slate-400">{guide.noDataMeaning}</p>
+      </div>
+
+      {verify ? (
+        onNavigate ? (
+          <button
+            type="button"
+            onClick={() => onNavigate(verify.targetTab)}
+            className="block w-full rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-left transition-colors hover:border-violet-400/60 hover:bg-violet-500/10"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-300">
+              Verify before live traffic
+            </p>
+            <p className="mt-1 text-sm text-slate-100">
+              {verify.action}
+              <span className="text-violet-300"> · Go to {verify.location} →</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">{verify.detail}</p>
+          </button>
+        ) : (
+          <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-300">
+              Verify before live traffic
+            </p>
+            <p className="mt-1 text-sm text-slate-100">
+              {verify.action}
+              <span className="text-slate-400"> · {verify.location}</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-400">{verify.detail}</p>
+          </div>
+        )
+      ) : null}
+
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          What you&apos;ll see after the first call
+        </p>
+        <ul className="mt-2 space-y-1.5 text-sm text-slate-400">
+          {guide.afterFirstCall.map((item) => (
+            <li key={item} className="flex gap-2">
+              <span aria-hidden="true" className="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-600" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 function eventTone(severity: string) {
@@ -23,7 +96,7 @@ function eventTone(severity: string) {
   return "border-slate-800 bg-slate-950 text-slate-100";
 }
 
-export function IntegrationDiagnosticsPanel({ integration }: Props) {
+export function IntegrationDiagnosticsPanel({ integration, onNavigate }: Props) {
   const summary = getDiagnosticsSummary(integration);
 
   return (
@@ -58,14 +131,16 @@ export function IntegrationDiagnosticsPanel({ integration }: Props) {
       </div>
 
       {integration.recentEvents.length === 0 ? (
-        <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-4">
-          <p className="text-sm font-semibold text-white">No recent events</p>
-          <p className="mt-1 text-sm text-slate-400">
-            {integration.isConfigured
-              ? "Configuration is complete. Your first webhook event will appear here once the provider sends it."
-              : "Connect this provider to start receiving webhook diagnostics."}
-          </p>
-        </div>
+        integration.isConfigured ? (
+          <PreTrafficGuide guide={getIntegrationPreTrafficGuide(integration)} onNavigate={onNavigate} />
+        ) : (
+          <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-4">
+            <p className="text-sm font-semibold text-white">No diagnostics yet</p>
+            <p className="mt-1 text-sm text-slate-400">
+              Connect this provider to start receiving webhook diagnostics.
+            </p>
+          </div>
+        )
       ) : (
         <div className="space-y-3">
           {integration.recentEvents.map((event) => (

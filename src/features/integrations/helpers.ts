@@ -752,3 +752,68 @@ export function getDiagnosticsSummaryLine(integration: IntegrationCard) {
     ? "Recent Ringba pixel events need attention. Review the latest messages below."
     : "Recent webhook events need attention. Review the latest messages below.";
 }
+
+const WORKSPACE_TAB_LABELS: Record<IntegrationWorkspaceTab, string> = {
+  overview: "Overview",
+  pixel: "Pixel",
+  api: "API sync",
+  advanced: "Advanced",
+  imports: "Imports",
+  diagnostics: "Diagnostics",
+  setup: "Setup",
+  security: "Security",
+};
+
+export interface IntegrationPreTrafficGuide {
+  /** A verification the user can run now, before live traffic (null when no required step remains). */
+  verifyNow: { action: string; detail: string; location: string; targetTab: IntegrationWorkspaceTab } | null;
+  /** Provider-accurate signals that will appear in Diagnostics after the first call. */
+  afterFirstCall: string[];
+  /** What an empty diagnostics list means before traffic, and how to tell setup issues from no-traffic. */
+  noDataMeaning: string;
+}
+
+/**
+ * Pre-traffic guidance for the Diagnostics empty state: what to verify now, what
+ * signals will appear after the first call, and what "no events yet" actually
+ * means. Reuses `getIntegrationNextStep` for the verify-now action so the copy
+ * stays in sync with the setup checklist. Provider claims are deliberately
+ * conservative — only Ringba's parsed fields (recording link, duration, campaign,
+ * publisher) are named, since the other providers' field-level normalization is
+ * not yet runtime-proven.
+ */
+export function getIntegrationPreTrafficGuide(integration: IntegrationCard): IntegrationPreTrafficGuide {
+  const nextStep = getIntegrationNextStep(integration);
+  const verifyNow = nextStep.cta
+    ? {
+        action: nextStep.cta.label,
+        detail: nextStep.description,
+        location: `${WORKSPACE_TAB_LABELS[nextStep.cta.targetTab]} tab`,
+        targetTab: nextStep.cta.targetTab,
+      }
+    : null;
+
+  if (integration.provider === "ringba") {
+    return {
+      verifyNow,
+      afterFirstCall: [
+        "An accepted event with the call's time, caller number, duration, campaign, publisher, and recording link.",
+        "The “Last event” time and “Recent successes” count update within seconds of a completed call.",
+        "Calls shorter than your minimum duration are logged as skipped — not as errors.",
+      ],
+      noDataMeaning:
+        "An empty list before your first call is expected — it does not mean the connection is broken. Place the pixel (or run a scheduled sync) and complete a test call; events appear here within seconds. Still nothing after a minute? Re-check your Account ID, API token, and pixel URL.",
+    };
+  }
+
+  return {
+    verifyNow,
+    afterFirstCall: [
+      "An accepted event showing the call's message, event type, severity, and time.",
+      "The “Last event” time and “Recent successes” count update once the provider posts a webhook.",
+      "Signature or payload problems are logged here as warnings or errors.",
+    ],
+    noDataMeaning:
+      "An empty list before your first webhook is expected — it does not mean the connection is broken. Point the provider at the webhook endpoint and send a test event; it appears here within seconds. Still nothing after a minute? Re-check the endpoint URL and your signing secret.",
+  };
+}

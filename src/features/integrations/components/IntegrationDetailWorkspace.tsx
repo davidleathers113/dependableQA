@@ -25,6 +25,8 @@ interface Props {
   onCreateIntegration: () => void;
   onLaunchWizard: () => void;
   externalNotice: { type: "success" | "error"; text: string } | null;
+  /** Org per-minute wallet rate (cents); 0 when analysis is not metered. */
+  perMinuteRateCents: number;
 }
 
 export function IntegrationDetailWorkspace({
@@ -37,6 +39,7 @@ export function IntegrationDetailWorkspace({
   onCreateIntegration,
   onLaunchWizard,
   externalNotice,
+  perMinuteRateCents,
 }: Props) {
   const queryClient = useQueryClient();
   const canManage = currentUserRole === "owner" || currentUserRole === "admin";
@@ -264,7 +267,7 @@ export function IntegrationDetailWorkspace({
       onLaunchWizard={onLaunchWizard}
     />
   );
-  const diagnosticsPanel = <IntegrationDiagnosticsPanel integration={integration} />;
+  const diagnosticsPanel = <IntegrationDiagnosticsPanel integration={integration} onNavigate={setActiveTab} />;
   const overviewPanel = <IntegrationOverviewPanel integration={integration} onNavigate={setActiveTab} />;
 
   const tabs: TabDescriptor[] = isRingba
@@ -291,7 +294,7 @@ export function IntegrationDetailWorkspace({
           ),
         },
         { id: "pixel", label: "Pixel", icon: Webhook, panel: setupPanel },
-        { id: "imports", label: "Imports", icon: DownloadCloud, panel: <RingbaImportPanel integration={integration} canManage={canManage} /> },
+        { id: "imports", label: "Imports", icon: DownloadCloud, panel: <RingbaImportPanel integration={integration} canManage={canManage} perMinuteRateCents={perMinuteRateCents} /> },
         { id: "diagnostics", label: "Diagnostics", icon: Siren, panel: diagnosticsPanel },
         {
           id: "advanced",

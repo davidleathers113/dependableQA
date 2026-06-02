@@ -14,6 +14,7 @@ import {
   getIntegrationLatestEventText,
   getIntegrationLatestStatusLabel,
   getIntegrationNextStep,
+  getIntegrationPreTrafficGuide,
   getRingbaPixelUrl,
   getIntegrationSummaryMeta,
   getSecretSourceLabel,
@@ -306,6 +307,56 @@ describe("integration helpers", () => {
 
     expect(url.includes("&publisher_name=[tag:Publisher:Name]")).toBe(true);
     expect(url.endsWith("&buyer_name=[tag:Buyer:Name]")).toBe(true);
+  });
+});
+
+describe("getIntegrationPreTrafficGuide", () => {
+  it("points a created-but-uncredentialed Ringba integration at the next verification", () => {
+    const integration = createIntegration(); // created, no API token yet
+    const guide = getIntegrationPreTrafficGuide(integration);
+
+    expect(guide.verifyNow).toEqual({
+      action: "Add credentials",
+      detail: expect.stringContaining("Ringba Account ID"),
+      location: "API sync tab",
+      targetTab: "api",
+    });
+    // Provider-accurate: Ringba parses recording/duration/campaign fields.
+    expect(guide.afterFirstCall.join(" ")).toContain("recording link");
+    expect(guide.noDataMeaning).toContain("expected");
+    expect(guide.noDataMeaning).toContain("API token");
+  });
+
+  it("clears the verify-now action once all required steps are done", () => {
+    const integration = createIntegration({
+      ringba: rb({ apiTokenConfigured: true, ringbaAccountId: "acct_1", lastRingbaApiSyncAt: "2026-06-01T00:00:00.000Z" }),
+      lastSuccessAt: "2026-06-01T00:00:00.000Z",
+    });
+
+    const guide = getIntegrationPreTrafficGuide(integration);
+    expect(guide.verifyNow).toBeNull();
+    // Expectations still render even when there's nothing left to verify.
+    expect(guide.afterFirstCall.length).toBeGreaterThan(0);
+  });
+
+  it("gives webhook providers generic, non-invented expectations and a security CTA", () => {
+    const integration = createIntegration({
+      provider: "retreaver",
+      displayName: "Retreaver",
+    });
+
+    const guide = getIntegrationPreTrafficGuide(integration);
+    expect(guide.verifyNow).toEqual({
+      action: "Configure security",
+      detail: expect.stringContaining("request signing"),
+      location: "Security tab",
+      targetTab: "security",
+    });
+    // Must NOT claim Ringba-specific parsed fields for other providers.
+    expect(guide.afterFirstCall.join(" ")).not.toContain("recording link");
+    expect(guide.afterFirstCall.join(" ")).toContain("event type");
+    expect(guide.noDataMeaning).toContain("webhook");
+    expect(guide.noDataMeaning).toContain("signing secret");
   });
 });
 

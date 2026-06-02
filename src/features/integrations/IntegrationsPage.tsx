@@ -2,6 +2,7 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QueryProvider } from "../../components/providers/QueryProvider";
 import type { IntegrationsSummary } from "../../lib/app-data";
+import { CallGridInfoCard } from "./components/CallGridInfoCard";
 import { CustomIntegrationInfoCard } from "./components/CustomIntegrationInfoCard";
 import { IntegrationDetailWorkspace } from "./components/IntegrationDetailWorkspace";
 import { RetreaverConnectWizard } from "./components/RetreaverConnectWizard";
@@ -13,6 +14,8 @@ interface Props {
   organizationId: string;
   currentUserRole: string;
   initialData: IntegrationsSummary;
+  /** Org per-minute wallet rate (cents); 0 when analysis is not metered. */
+  perMinuteRateCents: number;
 }
 
 async function fetchIntegrationsSummary() {
@@ -25,7 +28,7 @@ async function fetchIntegrationsSummary() {
   return payload;
 }
 
-function IntegrationsPageInner({ organizationId, currentUserRole, initialData }: Props) {
+function IntegrationsPageInner({ organizationId, currentUserRole, initialData, perMinuteRateCents }: Props) {
   const queryClient = useQueryClient();
   const integrationsQuery = useQuery({
     queryKey: ["integrations", organizationId],
@@ -224,6 +227,7 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
                     integration={selectedIntegration}
                     organizationId={organizationId}
                     currentUserRole={currentUserRole}
+                    perMinuteRateCents={perMinuteRateCents}
                     focusSection={focusSection}
                     onFocusHandled={() => setFocusSection(null)}
                     isCreatingIntegration={createMutation.isPending}
@@ -244,6 +248,7 @@ function IntegrationsPageInner({ organizationId, currentUserRole, initialData }:
       </div>
 
       <CustomIntegrationInfoCard />
+      <CallGridInfoCard />
 
       {activeWizardIntegration?.provider === "trackdrive" ? (
         <TrackDriveConnectWizard

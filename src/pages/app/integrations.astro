@@ -4,6 +4,8 @@ import AppLayout from '../../layouts/AppLayout.astro';
 import IntegrationsPage from '../../features/integrations/IntegrationsPage';
 import { getIntegrationsSummary } from '../../lib/app-data';
 import { requireAppSession } from '../../lib/auth/require-app-session';
+import { getAdminSupabase } from '../../lib/supabase/admin-client';
+import { loadBillingContext } from '../../server/ai-pricing';
 
 const session = await requireAppSession(Astro);
 const env = typeof process !== "undefined" ? process.env : {};
@@ -13,6 +15,11 @@ const initialData = await getIntegrationsSummary(Astro.locals.supabase, session.
   fallbackHeaderName: env.INTEGRATION_INGEST_SIGNATURE_HEADER,
   fallbackPrefix: env.INTEGRATION_INGEST_SIGNATURE_PREFIX,
 });
+// Per-minute wallet rate for the Ringba import cost estimate. Read via the
+// org-scoped service-role client (org-filtered inside loadBillingContext) so the
+// rate is reliable regardless of the caller's RLS read access. 0 = not metered.
+const billingContext = await loadBillingContext(getAdminSupabase(), session.organization.id);
+const perMinuteRateCents = billingContext?.perMinuteRateCents ?? 0;
 ---
 
 <AppLayout title="Integrations" session={session}>
@@ -26,5 +33,6 @@ const initialData = await getIntegrationsSummary(Astro.locals.supabase, session.
     organizationId={session.organization.id}
     currentUserRole={session.organization.role}
     initialData={initialData}
+    perMinuteRateCents={perMinuteRateCents}
   />
 </AppLayout>
