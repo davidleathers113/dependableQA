@@ -2,11 +2,10 @@ import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, DownloadCloud, Sparkles } from "lucide-react";
 import type { IntegrationCard } from "../../../lib/app-data";
+import { estimateBatchCostLabel } from "../../billing/pricing";
 
 /** Hard cap mirrored from the server (RINGBA_MANUAL_IMPORT_MAX_RECORDS). */
 const MAX_RECORDS = 2000;
-/** Rough per-call OpenAI estimate (transcription + analysis) for the cost warning. */
-const ESTIMATED_COST_PER_CALL_USD = 0.03;
 
 type ImportBehavior = "import_only" | "review" | "analyze";
 
@@ -48,6 +47,8 @@ function readinessLabel(status: string): string {
 interface Props {
   integration: IntegrationCard;
   canManage: boolean;
+  /** Org per-minute wallet rate (cents); 0 when analysis is not metered. */
+  perMinuteRateCents: number;
 }
 
 function todayIso(offsetDays: number): string {
@@ -56,11 +57,7 @@ function todayIso(offsetDays: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function estimateCostLabel(count: number): string {
-  return `~$${(count * ESTIMATED_COST_PER_CALL_USD).toFixed(2)}`;
-}
-
-export function RingbaImportPanel({ integration, canManage }: Props) {
+export function RingbaImportPanel({ integration, canManage, perMinuteRateCents }: Props) {
   const [dateStart, setDateStart] = React.useState(todayIso(-7));
   const [dateEnd, setDateEnd] = React.useState(todayIso(0));
   const [maxRecords, setMaxRecords] = React.useState(100);
@@ -198,6 +195,21 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
   };
 
   const selectedIds = result ? result.callIds.filter((id) => selected.has(id)) : [];
+
+  // Cost estimates from the imported calls' actual durations × the org per-minute
+  // rate (rounded up, 1-min minimum) — matches how the wallet settles charges.
+  const durationByCallId = React.useMemo(
+    () => new Map((result?.importedCalls ?? []).map((call) => [call.callId, call.durationSeconds])),
+    [result]
+  );
+  const selectedEstimate = estimateBatchCostLabel(
+    selectedIds.map((id) => durationByCallId.get(id) ?? 0),
+    perMinuteRateCents
+  );
+  const allImportedEstimate = estimateBatchCostLabel(
+    (result?.importedCalls ?? []).map((call) => call.durationSeconds),
+    perMinuteRateCents
+  );
 
   return (
     <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5">
@@ -368,11 +380,20 @@ export function RingbaImportPanel({ integration, canManage }: Props) {
 
               <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  Queueing AI runs OpenAI transcription + analysis. Estimated cost — selected:{" "}
-                  <span className="font-semibold">{estimateCostLabel(selectedIds.length)}</span>, all imported:{" "}
-                  <span className="font-semibold">{estimateCostLabel(result.callIds.length)}</span>. Estimates only.
-                </span>
+                {perMinuteRateCents > 0 ? (
+                  <span>
+                    Queueing AI runs OpenAI transcription + analysis, billed per minute of audio (rounded up,
+                    1-minute minimum). Estimated cost — selected:{" "}
+                    <span className="font-semibold">{selectedEstimate}</span>, all imported:{" "}
+                    <span className="font-semibold">{allImportedEstimate}</span>. Estimates only; only calls
+                    still needing transcription are charged.
+                  </span>
+                ) : (
+                  <span>
+                    Queueing AI runs OpenAI transcription + analysis. AI analysis isn't metered for this
+                    organization (no per-minute rate configured).
+                  </span>
+                )}
               </div>
 
               {readiness ? (

@@ -10,6 +10,7 @@ import { BillingEventList } from "./components/BillingEventList";
 import { BillingHealthBanner } from "./components/BillingHealthBanner";
 import { EditAutoRechargeModal } from "./components/EditAutoRechargeModal";
 import { PaymentMethodCard } from "./components/PaymentMethodCard";
+import { PricingSummaryCard } from "./components/PricingSummaryCard";
 import { RunwayCard } from "./components/RunwayCard";
 import { WalletLedgerTable } from "./components/WalletLedgerTable";
 
@@ -130,6 +131,8 @@ function BillingPageInner({ organizationId, initialData }: Props) {
         />
         <RunwayCard runway={data.runway} isRefreshing={billingQuery.isFetching} />
       </div>
+
+      <PricingSummaryCard perMinuteRateCents={data.perMinuteRateCents} />
 
       <WalletLedgerTable ledger={data.ledger} isRefreshing={billingQuery.isFetching} />
       <BillingEventList events={data.events} isRefreshing={billingQuery.isFetching} />
