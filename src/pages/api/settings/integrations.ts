@@ -16,9 +16,10 @@ import {
   type IntegrationWebhookAuthType,
 } from "../../../lib/integration-config";
 import type { TablesInsert } from "../../../../supabase/types";
-import { loadIntegrationContext } from "../../../server/integration-ingest";
+import { loadIntegrationContext, type IntegrationContext } from "../../../server/integration-ingest";
 import { runRingbaApiSyncForIntegration } from "../../../server/ringba-api-sync";
 import { testRingbaConnection } from "../../../server/ringba-import";
+import { testTrackDriveConnection } from "../../../server/trackdrive-import";
 import { sendIntegrationTestEvent } from "../../../server/integration-test-event";
 
 export const prerender = false;
@@ -62,6 +63,13 @@ function normalizeProvider(value: unknown): IntegrationProvider | null {
   }
 
   return null;
+}
+
+function integrationBelongsToSessionOrg(
+  integration: IntegrationContext | null,
+  organizationId: string
+): integration is IntegrationContext {
+  return Boolean(integration && integration.organizationId === organizationId);
 }
 
 function getSummaryDefaults() {
@@ -343,7 +351,11 @@ export const POST: APIRoute = async (context) => {
       message = "Ringba API sync settings saved.";
     } else if (action === "sync-ringba-api") {
       const integration = await loadIntegrationContext(admin, integrationId);
-      if (!integration || integration.provider !== "ringba") {
+      // Admin client bypasses RLS — scope the loaded integration to the caller's org.
+      if (
+        !integrationBelongsToSessionOrg(integration, session.organization.id) ||
+        integration?.provider !== "ringba"
+      ) {
         return json({ error: "Ringba integration not found." }, 404);
       }
 
@@ -372,7 +384,11 @@ export const POST: APIRoute = async (context) => {
       });
     } else if (action === "test-ringba-connection") {
       const integration = await loadIntegrationContext(admin, integrationId);
-      if (!integration || integration.provider !== "ringba") {
+      // Admin client bypasses RLS — scope the loaded integration to the caller's org.
+      if (
+        !integrationBelongsToSessionOrg(integration, session.organization.id) ||
+        integration?.provider !== "ringba"
+      ) {
         return json({ error: "Ringba integration not found." }, 404);
       }
 
@@ -388,8 +404,36 @@ export const POST: APIRoute = async (context) => {
       }
 
       message = `Connection successful. Ringba returned ${outcome.sampleCount} sample record(s).`;
+    } else if (action === "test-trackdrive-connection") {
+      const integration = await loadIntegrationContext(admin, integrationId);
+      // Admin client bypasses RLS — scope the loaded integration to the caller's org.
+      if (
+        !integration ||
+        integration.provider !== "trackdrive" ||
+        integration.organizationId !== session.organization.id
+      ) {
+        return json({ error: "TrackDrive integration not found." }, 404);
+      }
+
+      const outcome = await testTrackDriveConnection({
+        subdomain: asString(body.subdomain),
+        publicKey: asString(body.publicKey),
+        privateKey: asString(body.privateKey),
+      });
+      if (!outcome.ok) {
+        return json({ error: outcome.error ?? "TrackDrive connection test failed." }, 400);
+      }
+
+      message = `Connection successful. TrackDrive returned ${outcome.sampleCount} sample record(s).`;
     } else if (action === "send-test-event") {
       try {
+        const integration = await loadIntegrationContext(admin, integrationId);
+        // Admin client bypasses RLS — scope the loaded integration to the caller's org
+        // before generating signed sample payloads or recording integration events.
+        if (!integrationBelongsToSessionOrg(integration, session.organization.id)) {
+          return json({ error: "Integration not found." }, 404);
+        }
+
         const result = await sendIntegrationTestEvent(admin, integrationId);
         message = result.message;
       } catch (error) {

@@ -1,4 +1,6 @@
 import * as React from "react";
+import { PlugZap } from "lucide-react";
+import { StatusMessage } from "../../../components/ui/StatusMessage";
 import type { IntegrationCard } from "../../../lib/app-data";
 import { getWebhookEndpointUrl } from "../helpers";
 import { getTrackDriveApiWizardSteps, getTrackDriveManualWizardSteps } from "../wizard-content";
@@ -19,12 +21,20 @@ export function TrackDriveConnectWizard({ integration, isOpen, onClose, onComple
   const [stepIndex, setStepIndex] = React.useState(0);
   const [setupPath, setSetupPath] = React.useState<TrackDriveSetupPath>("api");
   const [subdomain, setSubdomain] = React.useState("");
+  const [publicKey, setPublicKey] = React.useState("");
+  const [privateKey, setPrivateKey] = React.useState("");
+  const [testNotice, setTestNotice] = React.useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isTesting, setIsTesting] = React.useState(false);
 
   React.useEffect(() => {
     if (!isOpen) {
       setStepIndex(0);
       setSetupPath("api");
       setSubdomain("");
+      setPublicKey("");
+      setPrivateKey("");
+      setTestNotice(null);
+      setIsTesting(false);
     }
   }, [isOpen]);
 
@@ -38,6 +48,8 @@ export function TrackDriveConnectWizard({ integration, isOpen, onClose, onComple
   const isChooserStep = stepIndex === 0;
   const contentStep = providerSteps[Math.max(0, stepIndex - 1)]!;
   const canGoNext = setupPath === "manual" || subdomain.trim().length > 0 || !isChooserStep;
+  const canTestApiConnection =
+    setupPath === "api" && subdomain.trim().length > 0 && publicKey.trim().length > 0 && privateKey.trim().length > 0;
 
   const handleNext = React.useCallback(() => {
     if (stepIndex >= totalSteps - 1) {
@@ -51,6 +63,39 @@ export function TrackDriveConnectWizard({ integration, isOpen, onClose, onComple
   const handleBack = React.useCallback(() => {
     setStepIndex((currentValue) => Math.max(0, currentValue - 1));
   }, []);
+
+  const handleTestConnection = React.useCallback(async () => {
+    if (!canTestApiConnection || isTesting) {
+      return;
+    }
+    setIsTesting(true);
+    setTestNotice(null);
+    try {
+      const response = await fetch("/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test-trackdrive-connection",
+          integrationId: integration.id,
+          subdomain,
+          publicKey,
+          privateKey,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "TrackDrive connection test failed.");
+      }
+      setTestNotice({ type: "success", text: payload.message ?? "TrackDrive connection test succeeded." });
+    } catch (error) {
+      setTestNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "TrackDrive connection test failed.",
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  }, [canTestApiConnection, integration.id, isTesting, privateKey, publicKey, subdomain]);
 
   const trackDriveUrl = subdomain.trim() ? `https://${subdomain.trim()}.trackdrive.com` : "https://trackdrive.com";
 
@@ -120,13 +165,59 @@ export function TrackDriveConnectWizard({ integration, isOpen, onClose, onComple
                 id="trackdrive-subdomain"
                 type="text"
                 value={subdomain}
-                onChange={(event) => setSubdomain(event.target.value)}
+                onChange={(event) => {
+                  setSubdomain(event.target.value);
+                  setTestNotice(null);
+                }}
                 placeholder="your-company"
                 className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none transition-colors focus:border-violet-500"
               />
               <p className="text-sm text-slate-400">
                 Enter the TrackDrive subdomain you sign into so the next steps can point you to the right account.
               </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Public key</span>
+                  <input
+                    type="text"
+                    value={publicKey}
+                    onChange={(event) => {
+                      setPublicKey(event.target.value);
+                      setTestNotice(null);
+                    }}
+                    autoComplete="off"
+                    className="h-10 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:ring-2 focus:ring-violet-500"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Private key</span>
+                  <input
+                    type="password"
+                    value={privateKey}
+                    onChange={(event) => {
+                      setPrivateKey(event.target.value);
+                      setTestNotice(null);
+                    }}
+                    autoComplete="new-password"
+                    className="h-10 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:ring-2 focus:ring-violet-500"
+                  />
+                </label>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-400">
+                The connection test reads one sample call with these typed keys. The keys are not saved by this wizard.
+              </div>
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={!canTestApiConnection || isTesting}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-600 bg-slate-950 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-violet-500/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <PlugZap className="h-4 w-4" aria-hidden />
+                {isTesting ? "Testing..." : "Test API connection"}
+              </button>
+              {testNotice ? (
+                <StatusMessage tone={testNotice.type === "success" ? "success" : "error"}>{testNotice.text}</StatusMessage>
+              ) : null}
               <a
                 href={trackDriveUrl}
                 target="_blank"

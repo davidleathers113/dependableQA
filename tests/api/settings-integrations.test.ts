@@ -9,6 +9,7 @@ const {
   sendIntegrationTestEvent,
   loadIntegrationContext,
   testRingbaConnection,
+  testTrackDriveConnection,
   runRingbaApiSyncForIntegration,
   supportedIntegrationCatalog,
 } = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const {
   sendIntegrationTestEvent: vi.fn(),
   loadIntegrationContext: vi.fn(),
   testRingbaConnection: vi.fn(),
+  testTrackDriveConnection: vi.fn(),
   runRingbaApiSyncForIntegration: vi.fn(),
   supportedIntegrationCatalog: [
     {
@@ -66,6 +68,10 @@ vi.mock("../../src/server/integration-ingest", () => ({
 
 vi.mock("../../src/server/ringba-import", () => ({
   testRingbaConnection,
+}));
+
+vi.mock("../../src/server/trackdrive-import", () => ({
+  testTrackDriveConnection,
 }));
 
 vi.mock("../../src/server/ringba-api-sync", () => ({
@@ -197,6 +203,7 @@ describe("/api/settings/integrations", () => {
     sendIntegrationTestEvent.mockReset();
     loadIntegrationContext.mockReset();
     testRingbaConnection.mockReset();
+    testTrackDriveConnection.mockReset();
     runRingbaApiSyncForIntegration.mockReset();
   });
 
@@ -361,6 +368,13 @@ describe("/api/settings/integrations", () => {
     });
     const { client } = createIntegrationsAdminClient();
     getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_1",
+      organizationId: "org_1",
+      provider: "ringba",
+      displayName: "Primary Integration",
+      config: {},
+    });
     sendIntegrationTestEvent.mockResolvedValue({
       ok: true,
       message: "Test event accepted.",
@@ -437,6 +451,36 @@ describe("/api/settings/integrations", () => {
         recentEvents: [],
       },
     });
+  });
+
+  it("returns 404 when a test event targets another org's integration", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_other",
+      organizationId: "org_2",
+      provider: "ringba",
+      displayName: "Other Ringba",
+      config: {},
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "send-test-event",
+          integrationId: "integration_other",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(404);
+    expect(sendIntegrationTestEvent).not.toHaveBeenCalled();
   });
 
   it("creates a missing provider integration and returns refreshed summary data", async () => {
@@ -730,6 +774,66 @@ describe("/api/settings/integrations", () => {
     expect(body.message).toContain("Connection successful");
   });
 
+  it("returns 404 for a Ringba connection test that targets another org's integration", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_other",
+      organizationId: "org_2",
+      provider: "ringba",
+      displayName: "Other Ringba",
+      config: {},
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test-ringba-connection",
+          integrationId: "integration_other",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(404);
+    expect(testRingbaConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a manual Ringba sync that targets another org's integration", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_other",
+      organizationId: "org_2",
+      provider: "ringba",
+      displayName: "Other Ringba",
+      config: {},
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "sync-ringba-api",
+          integrationId: "integration_other",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(404);
+    expect(runRingbaApiSyncForIntegration).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when the Ringba connection test fails", async () => {
     requireApiSession.mockResolvedValue({
       user: { id: "user_1" },
@@ -758,5 +862,117 @@ describe("/api/settings/integrations", () => {
     }));
 
     expect(response.status).toBe(400);
+  });
+
+  it("tests a TrackDrive connection without saving credentials and reports the sample count", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_1",
+      organizationId: "org_1",
+      provider: "trackdrive",
+      displayName: "TrackDrive",
+      config: {},
+    });
+    testTrackDriveConnection.mockResolvedValue({ ok: true, sampleCount: 1 });
+    getIntegrationsSummary.mockResolvedValue({ integrations: [] });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test-trackdrive-connection",
+          integrationId: "integration_1",
+          subdomain: "acme",
+          publicKey: "public-key",
+          privateKey: "private-key",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(testTrackDriveConnection).toHaveBeenCalledWith({
+      subdomain: "acme",
+      publicKey: "public-key",
+      privateKey: "private-key",
+    });
+    const body = (await response.json()) as { message?: string };
+    expect(body.message).toContain("Connection successful");
+    expect(body.message).toContain("TrackDrive returned 1 sample");
+  });
+
+  it("returns 404 for a TrackDrive integration that belongs to another org (tenant scoping)", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    // Admin client can load any org's integration; the route must reject a cross-org id.
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_other",
+      organizationId: "org_2",
+      provider: "trackdrive",
+      displayName: "TrackDrive",
+      config: {},
+    });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test-trackdrive-connection",
+          integrationId: "integration_other",
+          subdomain: "acme",
+          publicKey: "public-key",
+          privateKey: "private-key",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(404);
+    // The cross-org connection test must never run.
+    expect(testTrackDriveConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when the TrackDrive connection test fails", async () => {
+    requireApiSession.mockResolvedValue({
+      user: { id: "user_1" },
+      organization: { id: "org_1", role: "owner" },
+    });
+    const { client } = createIntegrationsAdminClient();
+    getAdminSupabase.mockReturnValue(client);
+    loadIntegrationContext.mockResolvedValue({
+      id: "integration_1",
+      organizationId: "org_1",
+      provider: "trackdrive",
+      displayName: "TrackDrive",
+      config: {},
+    });
+    testTrackDriveConnection.mockResolvedValue({ ok: false, sampleCount: 0, error: "HTTP 401" });
+
+    const response = await POST(createApiContext({
+      request: new Request("http://localhost/api/settings/integrations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "test-trackdrive-connection",
+          integrationId: "integration_1",
+          subdomain: "acme",
+          publicKey: "public-key",
+          privateKey: "private-key",
+        }),
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: string };
+    expect(body.error).toBe("HTTP 401");
   });
 });
