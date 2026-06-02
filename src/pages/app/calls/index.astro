@@ -4,6 +4,9 @@ import AppLayout from '../../../layouts/AppLayout.astro';
 import CallsPage from '../../../features/calls/CallsPage';
 import { buildCallFilters, getCallsPageData } from '../../../lib/app-data';
 import { requireAppSession } from '../../../lib/auth/require-app-session';
+import { canSpendAi } from '../../../lib/auth/ai-spend-roles';
+import { getAdminSupabase } from '../../../lib/supabase/admin-client';
+import { loadBillingContext } from '../../../server/ai-pricing';
 
 const session = await requireAppSession(Astro);
 const initialData = await getCallsPageData(
@@ -11,6 +14,15 @@ const initialData = await getCallsPageData(
   session.organization.id,
   buildCallFilters(Astro.url.searchParams)
 );
+const canAnalyze = canSpendAi(session.organization.role);
+// Per-minute wallet rate for the analyze cost estimate. Read via the org-scoped
+// service-role client so the rate is available to every spend-capable role
+// (reviewer/analyst may lack RLS read access to billing_accounts). 0 = not metered.
+let perMinuteRateCents = 0;
+if (canAnalyze) {
+  const billing = await loadBillingContext(getAdminSupabase(), session.organization.id);
+  perMinuteRateCents = billing?.perMinuteRateCents ?? 0;
+}
 ---
 
 <AppLayout title="Calls" session={session}>
@@ -19,5 +31,7 @@ const initialData = await getCallsPageData(
     organizationId={session.organization.id}
     userId={session.user.id}
     initialData={initialData}
+    canAnalyze={canAnalyze}
+    perMinuteRateCents={perMinuteRateCents}
   />
 </AppLayout>

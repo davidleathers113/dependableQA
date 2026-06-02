@@ -29,6 +29,12 @@ interface Props {
   sortBy: "startedAt" | "durationSeconds" | "flagCount" | "updatedAt";
   sortDirection: "asc" | "desc";
   onSortChange: (sortBy: "startedAt" | "durationSeconds" | "flagCount" | "updatedAt") => void;
+  /** When true, render a leading checkbox column for bulk AI analysis selection. */
+  selectable?: boolean;
+  selectedIds?: Set<string>;
+  allSelected?: boolean;
+  onToggleSelect?: (callId: string) => void;
+  onToggleSelectAll?: (checked: boolean) => void;
 }
 
 const SORTABLE_COLUMNS: Partial<Record<CallsTableColumnKey, "startedAt" | "durationSeconds" | "flagCount" | "updatedAt">> = {
@@ -48,6 +54,11 @@ export function CallsTable({
   sortBy,
   sortDirection,
   onSortChange,
+  selectable = false,
+  selectedIds,
+  allSelected = false,
+  onToggleSelect,
+  onToggleSelectAll,
 }: Props) {
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -58,6 +69,9 @@ export function CallsTable({
   const rowClassName = density === "compact" ? "px-4 py-3" : "px-6 py-4";
   const secondaryTextClassName = density === "compact" ? "text-xs text-slate-500" : "text-xs text-slate-500";
   const visibleSet = new Set(visibleColumns);
+  const checkboxCellClassName = density === "compact" ? "px-4 py-3" : "px-6 py-4";
+  // Trailing "Detail" column, plus the leading select column when enabled.
+  const spannedColumns = visibleColumns.length + 1 + (selectable ? 1 : 0);
 
   const renderHeader = (columnKey: CallsTableColumnKey, label: string, alignRight = false) => {
     if (!visibleSet.has(columnKey)) {
@@ -94,6 +108,17 @@ export function CallsTable({
         <table className="min-w-full text-left text-sm border-collapse">
           <thead className="bg-slate-950/60 text-slate-400 border-b border-slate-800">
             <tr>
+              {selectable && (
+                <th className={`${checkboxCellClassName} w-10`}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all calls for analysis"
+                    checked={allSelected}
+                    onChange={(event) => onToggleSelectAll?.(event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-violet-500 focus:ring-violet-500"
+                  />
+                </th>
+              )}
               {renderHeader("dateTime", "Date/Time")}
               {renderHeader("callerNumber", "Caller Number")}
               {renderHeader("campaign", "Campaign")}
@@ -114,7 +139,7 @@ export function CallsTable({
             {isLoading ? (
               Array.from({ length: 6 }).map((_, index) => (
                 <tr key={`loading-${index}`}>
-                  <td colSpan={visibleColumns.length + 1} className="px-6 py-5">
+                  <td colSpan={spannedColumns} className="px-6 py-5">
                     <div className="space-y-2">
                       <div className="h-3 w-32 animate-pulse rounded bg-slate-800" />
                       <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
@@ -124,7 +149,7 @@ export function CallsTable({
               ))
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={visibleColumns.length + 1} className="px-6 py-12 text-center text-slate-500">
+                <td colSpan={spannedColumns} className="px-6 py-12 text-center text-slate-500">
                   <div className="mx-auto flex max-w-md flex-col items-center space-y-3">
                     <div className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Queue Empty
@@ -143,6 +168,17 @@ export function CallsTable({
                   className="group cursor-pointer hover:bg-slate-800/50 transition-colors"
                   onClick={() => onRowClick(row)}
                 >
+                  {selectable && (
+                    <td className={checkboxCellClassName} onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select call ${row.callerNumber} for analysis`}
+                        checked={selectedIds?.has(row.id) ?? false}
+                        onChange={() => onToggleSelect?.(row.id)}
+                        className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-violet-500 focus:ring-violet-500"
+                      />
+                    </td>
+                  )}
                   {visibleSet.has("dateTime") && (
                     <td className={`${rowClassName} whitespace-nowrap`}>
                       <div className="font-medium text-slate-200"><LocalTime value={row.startedAt} /></div>
