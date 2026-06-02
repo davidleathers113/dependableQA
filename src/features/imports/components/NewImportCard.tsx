@@ -15,6 +15,9 @@ interface Props {
   successMessage: string;
   duplicateWarning: string;
   pendingFileName: string;
+  /** Opt-in to queue paid AI analysis on import (default off → metadata-only). */
+  analyzeOnImport?: boolean;
+  onAnalyzeOnImportChange?: (value: boolean) => void;
   onModeChange: (mode: ImportMode) => void;
   onProviderChange: (provider: IntegrationProvider) => void;
   onFileSelected: (file: File) => void;
@@ -29,6 +32,8 @@ export function NewImportCard({
   successMessage,
   duplicateWarning,
   pendingFileName,
+  analyzeOnImport = false,
+  onAnalyzeOnImportChange,
   onModeChange,
   onProviderChange,
   onFileSelected,
@@ -94,6 +99,23 @@ export function NewImportCard({
             ) : null}
           </div>
         ) : null}
+
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+          <input
+            type="checkbox"
+            checked={analyzeOnImport}
+            disabled={isUploading || !onAnalyzeOnImportChange}
+            onChange={(event) => onAnalyzeOnImportChange?.(event.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-600 text-violet-500 focus:ring-violet-500 disabled:opacity-50"
+          />
+          <span className="text-sm text-slate-300">
+            <span className="font-medium text-slate-200">Analyze with AI after import</span>
+            <span className="mt-0.5 block text-xs text-slate-400">
+              Off by default — imports stay metadata-only. When on, calls with a recording are transcribed and
+              analyzed, which spends wallet funds. You can also analyze later from the Calls list.
+            </span>
+          </span>
+        </label>
 
         <ImportDropzone uploadPhase={uploadPhase} disabled={isUploading} onFileSelect={onFileSelected} />
 

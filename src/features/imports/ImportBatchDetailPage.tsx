@@ -4,7 +4,12 @@ import { QueryProvider } from "../../components/providers/QueryProvider";
 import { getImportBatchDetail, type ImportBatchDetail } from "../../lib/app-data";
 import { getBrowserSupabase } from "../../lib/supabase/browser-client";
 import { dispatchImportBatchRequest } from "./api";
-import { canRetryImportBatch, getImportRetryHelper, normalizeImportDispatchError } from "./helpers";
+import {
+  canRetryImportBatch,
+  getImportRetryHelper,
+  normalizeImportDispatchError,
+  takeImportAiQueueNotice,
+} from "./helpers";
 import { LocalTime } from "../../components/ui/LocalTime";
 
 interface Props {
@@ -17,6 +22,13 @@ function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Pr
   const queryClient = useQueryClient();
   const [errorMessage, setErrorMessage] = React.useState("");
   const [successMessage, setSuccessMessage] = React.useState("");
+  // One-shot notice handed off from the upload flow when an analyze-on-import opt-in
+  // imported metadata but the paid-AI queue was blocked. Read + cleared on mount so
+  // it shows once and never reappears for retries or other batches.
+  const [aiQueueNotice, setAiQueueNotice] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setAiQueueNotice(takeImportAiQueueNotice(batchId));
+  }, [batchId]);
   const batchQuery = useQuery({
     queryKey: ["import-batch", organizationId, batchId],
     queryFn: () => getImportBatchDetail(getBrowserSupabase(), organizationId, batchId),
@@ -30,6 +42,8 @@ function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Pr
     onMutate: () => {
       setErrorMessage("");
       setSuccessMessage("");
+      // A re-dispatch is metadata-only; drop the stale upload-time AI notice.
+      setAiQueueNotice(null);
     },
     onSuccess: async (result) => {
       setSuccessMessage(
@@ -81,6 +95,18 @@ function ImportBatchDetailPageInner({ organizationId, batchId, initialData }: Pr
           </button>
         ) : null}
       </div>
+
+      {aiQueueNotice && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <span>{aiQueueNotice}</span>
+          <a
+            href="/app/billing"
+            className="shrink-0 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-semibold text-slate-950 transition-colors hover:bg-amber-300"
+          >
+            Add funds
+          </a>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">

@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImportBatchSummary } from "../../lib/app-data";
+import type { ImportAiQueueResult } from "./api";
 import {
   canRetryImportBatch,
   detectImportProvider,
   deriveImportSummarySnapshot,
   filterImportBatches,
   findDuplicateImportBatch,
+  formatImportAiQueueNotice,
   formatImportDateTime,
   getImportProviderHint,
   getImportRetryHelper,
@@ -17,7 +19,84 @@ import {
   hasActiveImportBatches,
   isCsvFile,
   normalizeImportUploadError,
+  stashImportAiQueueNotice,
+  takeImportAiQueueNotice,
 } from "./helpers";
+
+function aiQueue(overrides: Partial<ImportAiQueueResult> = {}): ImportAiQueueResult {
+  return {
+    attempted: true,
+    blocked: true,
+    reason: "insufficient_balance",
+    transcriptionQueued: 0,
+    analysisQueued: 0,
+    skipped: 0,
+    requiredCents: 500,
+    availableCents: 100,
+    ...overrides,
+  };
+}
+
+function fakeSessionStorage() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+  };
+}
+
+describe("import AI-queue notice", () => {
+  it("formats an actionable notice when an opt-in is blocked by balance", () => {
+    const message = formatImportAiQueueNotice(aiQueue());
+    expect(message).toContain("AI was not queued");
+    expect(message).toContain("Add funds");
+    expect(message).toContain("Calls list");
+  });
+
+  it("uses a generic blocked notice for non-balance reasons", () => {
+    const message = formatImportAiQueueNotice(aiQueue({ reason: "Too many calls selected." }));
+    expect(message).toContain("AI was not queued");
+    expect(message).not.toContain("Add funds");
+  });
+
+  it("returns null for metadata-only, successful, or missing outcomes", () => {
+    expect(formatImportAiQueueNotice(aiQueue({ attempted: false, blocked: false }))).toBeNull();
+    expect(formatImportAiQueueNotice(aiQueue({ attempted: true, blocked: false }))).toBeNull();
+    expect(formatImportAiQueueNotice(null)).toBeNull();
+    expect(formatImportAiQueueNotice(undefined)).toBeNull();
+  });
+
+  describe("stash/take handoff", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("stashes a blocked notice and yields it exactly once (clear on read)", () => {
+      vi.stubGlobal("window", { sessionStorage: fakeSessionStorage() });
+      stashImportAiQueueNotice("batch_1", aiQueue());
+      expect(takeImportAiQueueNotice("batch_1")).toContain("Add funds");
+      // One-shot: a second read (e.g. a later visit) sees nothing.
+      expect(takeImportAiQueueNotice("batch_1")).toBeNull();
+    });
+
+    it("does not stash for metadata-only or successful imports", () => {
+      vi.stubGlobal("window", { sessionStorage: fakeSessionStorage() });
+      stashImportAiQueueNotice("batch_2", aiQueue({ attempted: false, blocked: false }));
+      stashImportAiQueueNotice("batch_3", aiQueue({ attempted: true, blocked: false }));
+      expect(takeImportAiQueueNotice("batch_2")).toBeNull();
+      expect(takeImportAiQueueNotice("batch_3")).toBeNull();
+    });
+
+    it("is isolated per batch id (an unrelated batch sees nothing)", () => {
+      vi.stubGlobal("window", { sessionStorage: fakeSessionStorage() });
+      stashImportAiQueueNotice("batch_1", aiQueue());
+      expect(takeImportAiQueueNotice("batch_other")).toBeNull();
+    });
+  });
+});
 
 const SAMPLE_BATCHES: ImportBatchSummary[] = [
   {

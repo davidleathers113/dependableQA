@@ -21,6 +21,7 @@ import {
   type ImportMode,
   normalizeImportDispatchError,
   normalizeImportUploadError,
+  stashImportAiQueueNotice,
   type ImportUploadErrorState,
   type ImportUploadPhase,
 } from "./helpers";
@@ -42,6 +43,8 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
   const [pendingFile, setPendingFile] = React.useState<File | null>(null);
   const [retryingBatchId, setRetryingBatchId] = React.useState<string | null>(null);
   const [retryNotice, setRetryNotice] = React.useState<{ tone: "success" | "warning" | "error"; message: string } | null>(null);
+  // Off by default: imports stay metadata-only unless the user opts into paid AI.
+  const [analyzeOnImport, setAnalyzeOnImport] = React.useState(false);
 
   const importsQuery = useQuery({
     queryKey: ["imports", organizationId],
@@ -54,7 +57,15 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: async ({ file, sourceProvider }: { file: File; sourceProvider: IntegrationProvider }) => {
+    mutationFn: async ({
+      file,
+      sourceProvider,
+      analyzeOnImport: analyze,
+    }: {
+      file: File;
+      sourceProvider: IntegrationProvider;
+      analyzeOnImport: boolean;
+    }) => {
       const supabase = getBrowserSupabase();
       const storagePath = buildImportStoragePath(organizationId, file.name);
       let batchId: string | null = null;
@@ -87,7 +98,10 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
       setCreatedBatchId(batchId);
       setUploadPhase("dispatching");
       try {
-        await dispatchImportBatchRequest(batchId);
+        const dispatchResult = await dispatchImportBatchRequest(batchId, analyze);
+        // Hand the (one-shot) blocked-AI notice to the batch-detail page we redirect
+        // to; a no-op for metadata-only imports and successful AI queues.
+        stashImportAiQueueNotice(batchId, dispatchResult.aiQueue);
       } catch (error) {
         const dispatchError = error as Error & { batchId?: string | null; stage?: ImportUploadPhase | null; statusCode?: number };
         dispatchError.batchId = batchId;
@@ -164,7 +178,7 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
       const startUpload = (sourceProvider: IntegrationProvider) => {
         setErrorState(null);
         setRetryNotice(null);
-        uploadMutation.mutate({ file, sourceProvider });
+        uploadMutation.mutate({ file, sourceProvider, analyzeOnImport });
       };
 
       const detectAndUpload = async () => {
@@ -212,7 +226,7 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
 
       void detectAndUpload();
     },
-    [importsQuery.data.batches, mode, provider, uploadMutation]
+    [importsQuery.data.batches, mode, provider, uploadMutation, analyzeOnImport]
   );
 
   const continuePendingFile = React.useCallback(() => {
@@ -220,8 +234,8 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
       return;
     }
 
-    uploadMutation.mutate({ file: pendingFile, sourceProvider: provider });
-  }, [pendingFile, provider, uploadMutation]);
+    uploadMutation.mutate({ file: pendingFile, sourceProvider: provider, analyzeOnImport });
+  }, [pendingFile, provider, uploadMutation, analyzeOnImport]);
 
   const retryNoticeBanner = retryNotice ? (
     <div
@@ -254,6 +268,8 @@ function ImportsPageInner({ organizationId, userId, initialData }: Props) {
         successMessage={successMessage}
         duplicateWarning={duplicateWarning}
         pendingFileName={pendingFile?.name ?? ""}
+        analyzeOnImport={analyzeOnImport}
+        onAnalyzeOnImportChange={setAnalyzeOnImport}
         onModeChange={(nextMode) => {
           setMode(nextMode);
           if (nextMode === "auto") {

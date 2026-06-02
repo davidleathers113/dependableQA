@@ -49,4 +49,50 @@ describe("NewImportCard", () => {
     expect(html.includes("Selected file: mystery.csv")).toBe(true);
     expect(html.includes("Ringba format")).toBe(true);
   });
+
+  it("offers a metadata-only-by-default AI opt-in that names the wallet impact", () => {
+    const offHtml = renderToStaticMarkup(
+      <NewImportCard
+        mode="auto"
+        selectedProvider="custom"
+        uploadPhase="idle"
+        errorState={null}
+        successMessage=""
+        duplicateWarning=""
+        pendingFileName=""
+        analyzeOnImport={false}
+        onAnalyzeOnImportChange={() => undefined}
+        onModeChange={() => undefined}
+        onProviderChange={() => undefined}
+        onFileSelected={() => undefined}
+        onContinuePendingFile={() => undefined}
+      />
+    );
+
+    expect(offHtml.includes("Analyze with AI after import")).toBe(true);
+    expect(offHtml.includes("imports stay metadata-only")).toBe(true);
+    expect(offHtml.includes("spends wallet funds")).toBe(true);
+    // Unchecked by default — no surprise spend.
+    expect(offHtml.includes("checked=")).toBe(false);
+
+    const onHtml = renderToStaticMarkup(
+      <NewImportCard
+        mode="auto"
+        selectedProvider="custom"
+        uploadPhase="idle"
+        errorState={null}
+        successMessage=""
+        duplicateWarning=""
+        pendingFileName=""
+        analyzeOnImport={true}
+        onAnalyzeOnImportChange={() => undefined}
+        onModeChange={() => undefined}
+        onProviderChange={() => undefined}
+        onFileSelected={() => undefined}
+        onContinuePendingFile={() => undefined}
+      />
+    );
+
+    expect(onHtml.includes("checked=")).toBe(true);
+  });
 });

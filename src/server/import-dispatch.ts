@@ -2,9 +2,102 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, TablesInsert } from "../../supabase/types";
 import { insertAuditLog, isValidImportStoragePath, slugify } from "../lib/app-data";
 import { enqueueAiJob } from "./ai-jobs";
+import {
+  ANALYZE_SELECTED_MAX_BATCH,
+  enqueueAnalysisForCalls,
+  InsufficientBalanceError,
+} from "./analyze-selection";
 import { getImportBatchFinalStatus, parseCsv, type CsvRow } from "./import-csv";
 
 type SupabaseAny = SupabaseClient<Database>;
+
+/**
+ * Outcome of the reservation-backed AI queue step for a CSV opt-in import.
+ * `attempted: false` means the user did not opt in (or no analyzable calls were
+ * imported). When attempted, `blocked` distinguishes a wallet/cap failure (the
+ * metadata import still succeeds) from a successful queue.
+ */
+export type ImportAiQueueOutcome =
+  | { attempted: false }
+  | {
+      attempted: true;
+      blocked: boolean;
+      reason: string | null;
+      transcriptionQueued: number;
+      analysisQueued: number;
+      skipped: number;
+      requiredCents: number | null;
+      availableCents: number | null;
+    };
+
+function chunkIds(ids: string[], size: number): string[][] {
+  const groups: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    groups.push(ids.slice(index, index + size));
+  }
+  return groups;
+}
+
+/**
+ * Queue paid AI for opted-in CSV imports through the same reservation-backed gate
+ * the Calls list and Ringba import use (`enqueueAnalysisForCalls`): wallet reserve,
+ * org scoping, skip reasons, and the per-request batch cap all stay consistent.
+ * Chunked to the cap so a large CSV still queues like repeated analyze-selected
+ * calls. A wallet/cap failure stops further queueing and is reported as `blocked`
+ * — it never fails the (already-committed) metadata import.
+ */
+async function queueImportAnalysis(
+  client: SupabaseAny,
+  organizationId: string,
+  actorUserId: string | null,
+  callIds: string[]
+): Promise<ImportAiQueueOutcome> {
+  if (callIds.length === 0) {
+    return { attempted: false };
+  }
+
+  let transcriptionQueued = 0;
+  let analysisQueued = 0;
+  let skipped = 0;
+  let blocked = false;
+  let reason: string | null = null;
+  let requiredCents: number | null = null;
+  let availableCents: number | null = null;
+
+  for (const group of chunkIds(callIds, ANALYZE_SELECTED_MAX_BATCH)) {
+    try {
+      const result = await enqueueAnalysisForCalls(client, {
+        organizationId,
+        callIds: group,
+        actorUserId,
+      });
+      transcriptionQueued += result.transcriptionQueued;
+      analysisQueued += result.analysisQueued;
+      skipped += result.skipped.length;
+    } catch (error) {
+      blocked = true;
+      if (error instanceof InsufficientBalanceError) {
+        reason = "insufficient_balance";
+        requiredCents = error.requiredCents;
+        availableCents = error.availableCents;
+      } else {
+        reason = error instanceof Error ? error.message : "Unable to queue AI analysis.";
+      }
+      break;
+    }
+  }
+
+  return {
+    attempted: true,
+    blocked,
+    reason,
+    transcriptionQueued,
+    analysisQueued,
+    skipped,
+    requiredCents,
+    availableCents,
+  };
+}
 
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
@@ -136,8 +229,32 @@ async function markImportBatchFailed(
 
 export async function dispatchImportBatch(
   client: SupabaseAny,
-  options: { organizationId: string; batchId: string; actorUserId: string | null }
+  options: {
+    organizationId: string;
+    batchId: string;
+    actorUserId: string | null;
+    /**
+     * Legacy direct enqueue path (un-reserved `enqueueAiJob` per row). Defaults to
+     * `true` for back-compat with internal/test callers only; the user-facing route
+     * always passes `false` and drives AI through `analyzeOnImport` instead.
+     * Suppressed whenever `analyzeOnImport` is true.
+     */
+    enqueueAiJobs?: boolean;
+    /**
+     * The user-facing CSV "Analyze with AI after import" opt-in. When true, metadata
+     * is imported first and the newly accepted analyzable calls are queued through the
+     * reservation-backed gate (`enqueueAnalysisForCalls`) — same wallet reserve, org
+     * scoping, skip reasons, and batch cap as the Calls list / Ringba import. Default
+     * (undefined/false) keeps CSV import metadata-only.
+     */
+    analyzeOnImport?: boolean;
+  }
 ) {
+  const analyzeOnImport = options.analyzeOnImport === true;
+  // Legacy inline enqueue is mutually exclusive with the reservation-backed gate.
+  const legacyInlineEnqueue = (options.enqueueAiJobs ?? true) && !analyzeOnImport;
+  // Accepted, analyzable call ids to route through the reservation gate (opt-in only).
+  const analyzeCallIds: string[] = [];
   // Atomically claim the batch. Only one dispatch can flip a dispatchable batch
   // (uploaded/failed/partial) to processing: the status precondition on the UPDATE
   // plus the row lock means a concurrent or double dispatch matches zero rows and
@@ -345,18 +462,26 @@ export async function dispatchImportBatch(
             throw new Error(transcriptInsert.error.message);
           }
 
-          await enqueueAiJob(client, {
-            organizationId: options.organizationId,
-            callId,
-            jobType: "analysis",
-          });
+          if (legacyInlineEnqueue) {
+            await enqueueAiJob(client, {
+              organizationId: options.organizationId,
+              callId,
+              jobType: "analysis",
+            });
+          } else if (analyzeOnImport) {
+            analyzeCallIds.push(callId);
+          }
         } else if (recordingUrl) {
-          await enqueueAiJob(client, {
-            organizationId: options.organizationId,
-            callId,
-            jobType: "transcription",
-            payload: language ? { language } : {},
-          });
+          if (legacyInlineEnqueue) {
+            await enqueueAiJob(client, {
+              organizationId: options.organizationId,
+              callId,
+              jobType: "transcription",
+              payload: language ? { language } : {},
+            });
+          } else if (analyzeOnImport) {
+            analyzeCallIds.push(callId);
+          }
         }
 
         acceptedCount += 1;
@@ -395,6 +520,13 @@ export async function dispatchImportBatch(
       throw new Error(updateResult.error.message);
     }
 
+    // Metadata import is committed above. Only now do we attempt the opt-in AI
+    // queue through the reservation gate, so a wallet/cap block never undoes the
+    // imported calls — they stay available to analyze later from the Calls list.
+    const aiQueue = analyzeOnImport
+      ? await queueImportAnalysis(client, options.organizationId, options.actorUserId, analyzeCallIds)
+      : ({ attempted: false } as ImportAiQueueOutcome);
+
     await insertAuditLog(client, {
       organizationId: options.organizationId,
       actorUserId: options.actorUserId,
@@ -411,6 +543,10 @@ export async function dispatchImportBatch(
       metadata: {
         summary: `Processed ${acceptedCount} new rows, skipped ${skippedCount} duplicates, rejected ${rejectedCount}.`,
         filename: asString(batch.filename),
+        // Did the legacy inline path run, and what did the opt-in AI gate do?
+        aiEnqueued: legacyInlineEnqueue,
+        analyzeOnImport,
+        aiQueue,
       },
     });
 
@@ -420,6 +556,7 @@ export async function dispatchImportBatch(
       rejectedCount,
       rowCountTotal: rows.length,
       status: finalStatus,
+      aiQueue,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to dispatch import batch.";

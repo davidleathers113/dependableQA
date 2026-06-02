@@ -1,4 +1,5 @@
 import type { ImportBatchSummary, IntegrationProvider } from "../../lib/app-data";
+import type { ImportAiQueueResult } from "./api";
 
 export type ImportMode = "auto" | "manual";
 export type ImportUploadPhase =
@@ -637,4 +638,56 @@ export function normalizeImportUploadError(input: {
     message: "We couldn't upload that file. Please try again.",
     batchId: null,
   };
+}
+
+const IMPORT_AI_QUEUE_NOTICE_PREFIX = "dependableqa.import-ai-queue.";
+
+/**
+ * Human-readable notice when an analyze-on-import opt-in imported metadata but the
+ * paid-AI queue was blocked (e.g. insufficient wallet balance). Returns null for
+ * metadata-only imports and successful queues, so callers never show a notice the
+ * user didn't earn. Kept free of noisy cents accounting.
+ */
+export function formatImportAiQueueNotice(aiQueue: ImportAiQueueResult | null | undefined): string | null {
+  if (!aiQueue || !aiQueue.attempted || !aiQueue.blocked) {
+    return null;
+  }
+  if (aiQueue.reason === "insufficient_balance") {
+    return "Import completed, but AI was not queued — not enough wallet balance. Add funds, then analyze these calls from the Calls list.";
+  }
+  return "Import completed, but AI was not queued. You can analyze these calls from the Calls list.";
+}
+
+/**
+ * Stash a blocked-AI notice for `batchId` so the batch-detail page (reached via a
+ * redirect after upload) can show it once. No-op when there's nothing to show or
+ * sessionStorage is unavailable (SSR / private mode).
+ */
+export function stashImportAiQueueNotice(batchId: string, aiQueue: ImportAiQueueResult | null | undefined): void {
+  const message = formatImportAiQueueNotice(aiQueue);
+  if (!message || typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(`${IMPORT_AI_QUEUE_NOTICE_PREFIX}${batchId}`, message);
+  } catch {
+    // sessionStorage can throw (private mode / disabled) — surfacing the notice is best-effort.
+  }
+}
+
+/** Read and clear the one-shot blocked-AI notice for `batchId` (returns null if none). */
+export function takeImportAiQueueNotice(batchId: string): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const key = `${IMPORT_AI_QUEUE_NOTICE_PREFIX}${batchId}`;
+    const value = window.sessionStorage.getItem(key);
+    if (value !== null) {
+      window.sessionStorage.removeItem(key);
+    }
+    return value;
+  } catch {
+    return null;
+  }
 }

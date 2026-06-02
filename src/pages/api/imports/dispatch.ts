@@ -31,11 +31,19 @@ export const POST: APIRoute = async (context) => {
     });
   }
 
+  // Imports are metadata-only by default. Queuing paid AI on import is an
+  // explicit opt-in from the upload UI; anything other than `true` stays safe.
+  // The opt-in routes through the reservation-backed gate (`analyzeOnImport`),
+  // never the legacy un-reserved inline path (`enqueueAiJobs: false`).
+  const analyzeOnImport = body?.analyzeOnImport === true;
+
   try {
     const result = await dispatchImportBatch(getAdminSupabase(), {
       organizationId: session.organization.id,
       batchId,
       actorUserId: session.user.id,
+      enqueueAiJobs: false,
+      analyzeOnImport,
     });
 
     return new Response(JSON.stringify(result), {
