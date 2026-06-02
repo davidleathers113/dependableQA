@@ -76,6 +76,11 @@ firebase-adminsdk*.json
 !.cursor/rules/**
 .claude/
 
+# Local overnight harness state
+docs/product/claude-current-prompt.md
+docs/product/overnight-status.md
+docs/product/overnight-prompts-*.md
+
 # Merge leftovers
 *.orig
 
