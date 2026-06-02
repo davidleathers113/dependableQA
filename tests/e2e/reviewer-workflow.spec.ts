@@ -93,8 +93,20 @@ test.describe("reviewer workflow", () => {
 
   test("transcript search finds matches", async ({ page }) => {
     await page.goto(`/app/calls/${callId}`);
-    await typeStable(vis(page.getByRole("textbox", { name: "Search transcript", exact: false })), "pricing");
-    await expect(vis(page.getByRole("button", { name: "Next hit" }))).toBeEnabled();
+    const input = vis(page.getByRole("textbox", { name: "Search transcript", exact: false }));
+    const nextHit = vis(page.getByRole("button", { name: "Next hit" }));
+    // Type and assert together: keystrokes that land before the React island
+    // hydrates are discarded when the controlled input resets to its empty
+    // initial value, so retry the whole type until the search state (the enabled
+    // "Next hit" control) actually reflects the query. Same pattern as showTab's
+    // pre-hydration no-op guard.
+    await expect(async () => {
+      await input.click();
+      await input.fill("");
+      await input.pressSequentially("pricing", { delay: 15 });
+      await expect(input).toHaveValue("pricing", { timeout: 1000 });
+      await expect(nextHit).toBeEnabled({ timeout: 1000 });
+    }).toPass({ timeout: 15_000, intervals: [300, 700, 1200] });
     await expect(vis(page.locator("mark")).first()).toBeVisible();
   });
 
